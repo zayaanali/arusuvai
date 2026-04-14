@@ -200,7 +200,8 @@ function renderPantry(items) {
 
   pantryMeta.textContent = `${items.length} item${items.length === 1 ? "" : "s"} in pantry`;
 
-  const sorted = [...items].sort((a, b) => a.name.localeCompare(b.name));
+  const displayName = (item) => item?.name || item?.canonical_name || item?.display_name || "unnamed item";
+  const sorted = [...items].sort((a, b) => displayName(a).localeCompare(displayName(b)));
   for (const item of sorted) {
     const card = document.createElement("div");
     card.className = "pantry-item";
@@ -215,7 +216,7 @@ function renderPantry(items) {
           : `Expires in ${days} day(s)`;
 
     card.innerHTML = `
-      <h3>${item.name}</h3>
+      <h3>${displayName(item)}</h3>
       <p><strong>${item.quantity}</strong> ${item.unit}</p>
       <p>${expiryLine}</p>
       <span class="tag">${item.category}</span>
