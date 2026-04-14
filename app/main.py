@@ -79,12 +79,17 @@ def on_startup() -> None:
 
 @app.get("/", include_in_schema=False)
 def web_app() -> FileResponse:
-    return FileResponse(FRONTEND_DIR / "index.html")
+    return FileResponse(FRONTEND_DIR / "chat.html")
 
 
 @app.get("/chat", include_in_schema=False)
 def chat_web_app() -> FileResponse:
     return FileResponse(FRONTEND_DIR / "chat.html")
+
+
+@app.get("/dashboard", include_in_schema=False)
+def dashboard_web_app() -> FileResponse:
+    return FileResponse(FRONTEND_DIR / "index.html")
 
 
 @app.get("/health")
