@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Pantry Manager MVP</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Pantry Manager MVP</h1>
+      <p>Structured pantry + recipe manager (no AI yet)</p>
+    </header>
+
+    <main class="grid">
+      <section class="card">
+        <h2>Add Pantry Item</h2>
+        <form id="pantry-form">
+          <input name="name" placeholder="Name (required)" required />
+          <input name="quantity" type="number" step="0.01" placeholder="Quantity (optional, default 1)" />
+          <input name="unit" placeholder="Unit (optional, default unit)" />
+          <input name="expires_at" type="date" />
+          <input name="category" placeholder="Category (optional, default uncategorized)" />
+          <button type="submit">Add Pantry Item</button>
+        </form>
+      </section>
+
+      <section class="card">
+        <h2>Pantry</h2>
+        <div class="actions">
+          <button id="refresh-pantry">Refresh Pantry</button>
+          <button id="refresh-expiring">Expiring in 7 Days</button>
+        </div>
+        <pre id="pantry-output"></pre>
+      </section>
+
+      <section class="card">
+        <h2>Record Inventory Event</h2>
+        <form id="event-form">
+          <input name="pantry_item_id" type="number" placeholder="Pantry item ID" required />
+          <select name="event_type" required>
+            <option value="add">add</option>
+            <option value="use">use</option>
+            <option value="discard">discard</option>
+            <option value="adjust">adjust</option>
+          </select>
+          <input name="quantity_delta" type="number" step="0.01" placeholder="Delta (+/-)" required />
+          <input name="unit" placeholder="Unit" />
+          <input name="source" placeholder="Source" value="manual" />
+          <button type="submit">Record Event</button>
+        </form>
+      </section>
+
+      <section class="card">
+        <h2>Create Recipe</h2>
+        <form id="recipe-form">
+          <input name="title" placeholder="Recipe title" required />
+          <textarea name="instructions" placeholder="Instructions" rows="4" required></textarea>
+          <input name="servings" type="number" placeholder="Servings" />
+          <input name="prep_minutes" type="number" placeholder="Prep minutes" />
+          <input name="cook_minutes" type="number" placeholder="Cook minutes" />
+          <input name="source_url" placeholder="Source URL" />
+          <button type="submit">Create Recipe</button>
+        </form>
+      </section>
+
+      <section class="card">
+        <h2>Add Recipe Ingredient</h2>
+        <form id="recipe-ingredient-form">
+          <input name="recipe_id" type="number" placeholder="Recipe ID" required />
+          <input name="canonical_name" placeholder="Canonical ingredient" required />
+          <input name="raw_text" placeholder="Raw text" />
+          <input name="quantity" type="number" step="0.01" placeholder="Quantity" />
+          <input name="unit" placeholder="Unit" />
+          <label class="checkbox-row">
+            <input name="optional" type="checkbox" />
+            Optional ingredient
+          </label>
+          <button type="submit">Add Ingredient</button>
+        </form>
+      </section>
+
+      <section class="card">
+        <h2>Recipes + Matches</h2>
+        <div class="actions">
+          <button id="refresh-recipes">List Recipes</button>
+          <button id="refresh-matches">Recipe Matches</button>
+        </div>
+        <pre id="recipe-output"></pre>
+      </section>
+
+      <section class="card">
+        <h2>Add Shopping Item</h2>
+        <form id="shopping-form">
+          <input name="name" placeholder="Item name (required)" required />
+          <input name="quantity" type="number" step="0.01" placeholder="Quantity (optional)" />
+          <input name="unit" placeholder="Unit (optional)" />
+          <button type="submit">Add Shopping Item</button>
+        </form>
+      </section>
+
+      <section class="card">
+        <h2>Shopping List</h2>
+        <div class="actions">
+          <button id="refresh-shopping">Refresh</button>
+          <button id="refresh-shopping-open">Only Open Items</button>
+        </div>
+        <pre id="shopping-output"></pre>
+      </section>
+
+      <section class="card">
+        <h2>Add Ingredient Alias</h2>
+        <form id="alias-form">
+          <input name="alias" placeholder="Alias (green onions)" required />
+          <input name="canonical_name" placeholder="Canonical (scallions)" required />
+          <button type="submit">Add Alias</button>
+        </form>
+      </section>
+
+      <section class="card">
+        <h2>System Output</h2>
+        <pre id="system-output"></pre>
+      </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
