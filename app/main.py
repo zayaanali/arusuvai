@@ -55,6 +55,7 @@ app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
+    allow_origin_regex=r"^https://([a-z0-9-]+\.)?arusuvai\.pages\.dev$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -265,6 +266,11 @@ def clear_pantry(session: Session = Depends(get_session)):
         count += 1
     session.commit()
     return {"deleted": count}
+
+
+@app.post("/pantry/clear")
+def clear_pantry_via_post(session: Session = Depends(get_session)):
+    return clear_pantry(session)
 
 
 @app.delete("/pantry/{item_id}")
