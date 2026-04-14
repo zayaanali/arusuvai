@@ -13,6 +13,8 @@ const aboutBtn = document.getElementById("about-btn");
 const aboutModal = document.getElementById("about-modal");
 const aboutBackdrop = document.getElementById("about-backdrop");
 const aboutCloseBtn = document.getElementById("about-close");
+const DEFAULT_API_BASE_URL = "https://api.arusuvai.com";
+const API_BASE_URLS = Array.from(new Set([DEFAULT_API_BASE_URL, window.location.origin]));
 const MANUAL_HELP =
   "Type `help` any time to see all commands.";
 const HELP_TEXT = `Manual Commands
@@ -99,8 +101,24 @@ function addMessage(role, text) {
   chatLog.scrollTop = chatLog.scrollHeight;
 }
 
+function apiUrl(baseUrl, path) {
+  return `${baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
+}
+
+async function fetchWithFallback(path, options) {
+  let lastError = null;
+  for (const baseUrl of API_BASE_URLS) {
+    try {
+      return await fetch(apiUrl(baseUrl, path), options);
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  throw lastError || new Error("NetworkError");
+}
+
 async function api(path, options = {}) {
-  const res = await fetch(path, {
+  const res = await fetchWithFallback(path, {
     headers: { "Content-Type": "application/json" },
     ...options,
   });

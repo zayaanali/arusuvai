@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import os
 from datetime import datetime
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -33,12 +35,30 @@ from .services import canonicalize_name, expiring_cutoff, pantry_name_set, score
 
 app = FastAPI(title="Pantry Manager MVP", version="0.1.0")
 BASE_DIR = Path(__file__).resolve().parent
-STATIC_DIR = BASE_DIR / "static"
+FRONTEND_DIR = BASE_DIR / "frontend"
 DEFAULT_PANTRY_QUANTITY = 1.0
 DEFAULT_PANTRY_UNIT = "unit"
 DEFAULT_PANTRY_CATEGORY = "uncategorized"
+DEFAULT_ALLOWED_ORIGINS = [
+    "http://127.0.0.1:8000",
+    "http://localhost:8000",
+    "https://arusuvai.com",
+    "https://www.arusuvai.com",
+]
+ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv("CORS_ALLOW_ORIGINS", ",".join(DEFAULT_ALLOWED_ORIGINS)).split(",")
+    if origin.strip()
+]
 
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 class ChatRequest(BaseModel):
@@ -59,12 +79,12 @@ def on_startup() -> None:
 
 @app.get("/", include_in_schema=False)
 def web_app() -> FileResponse:
-    return FileResponse(STATIC_DIR / "index.html")
+    return FileResponse(FRONTEND_DIR / "index.html")
 
 
 @app.get("/chat", include_in_schema=False)
 def chat_web_app() -> FileResponse:
-    return FileResponse(STATIC_DIR / "chat.html")
+    return FileResponse(FRONTEND_DIR / "chat.html")
 
 
 @app.get("/health")
