@@ -1,2 +1,3 @@
+/ /chat 302
 /chat /chat.html 200
 /static/* /:splat 200
