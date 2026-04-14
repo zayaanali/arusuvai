@@ -19,11 +19,13 @@
     <header class="topbar">
       <div>
         <h1>arusuvai</h1>
-        <p>Natural commands today, AI agent soon.</p>
+        <p>balance is not one flavor — it is all in harmony</p>
       </div>
       <nav>
         <a href="/">Dashboard</a>
         <a href="/docs" target="_blank" rel="noreferrer">API Docs</a>
+        <button id="help-btn" type="button" class="nav-btn">Help</button>
+        <button id="about-btn" type="button" class="nav-btn">About</button>
       </nav>
     </header>
 
@@ -44,15 +46,15 @@
 
         <div class="quick-row">
           <button class="quick-btn" data-prompt="add green beans,corn">add green beans,corn</button>
-          <button class="quick-btn" data-prompt="rm corn">rm corn</button>
           <button class="quick-btn" data-prompt="list">list</button>
-          <button class="quick-btn" data-prompt="drop_table">drop_table</button>
+          <button class="quick-btn" data-prompt="shopping list">shopping list</button>
+          <button class="quick-btn" data-prompt="help">help</button>
         </div>
 
         <form id="chat-form" class="chat-form">
           <input
             id="chat-input"
-            placeholder="Manual: add item1,item2 | rm item1,item2 | list | drop_table"
+            placeholder="Manual mode commands enabled (add, rm, list, set, use, discard, rename, category, expiry, inc/dec, find, expiring, shopping)"
             autocomplete="off"
             required
           />
@@ -70,6 +72,70 @@
         <div id="pantry-list" class="pantry-list"></div>
       </aside>
     </main>
+
+    <div id="help-modal" class="modal hidden" aria-hidden="true" role="dialog" aria-labelledby="help-title">
+      <div id="help-backdrop" class="modal-backdrop"></div>
+      <section class="modal-card">
+        <div class="modal-head">
+          <h2 id="help-title">Manual Commands</h2>
+          <button id="help-close" type="button" class="ghost">Close</button>
+        </div>
+        <div class="modal-body">
+          <h3>Pantry Basics</h3>
+          <ul>
+            <li><code>add item1,item2</code> - Add all comma-separated items</li>
+            <li><code>rm item1,item2</code> - Remove matching pantry items</li>
+            <li><code>list</code> - Show all pantry items in snapshot</li>
+            <li><code>drop_table</code> - Clear entire pantry</li>
+          </ul>
+
+          <h3>Inventory Updates</h3>
+          <ul>
+            <li><code>set item,qty,category</code> - Set quantity and category</li>
+            <li><code>use item,qty</code> - Subtract quantity</li>
+            <li><code>discard item,qty</code> - Subtract quantity (same as use for now)</li>
+            <li><code>inc item,qty</code> - Increase quantity</li>
+            <li><code>dec item,qty</code> - Decrease quantity</li>
+          </ul>
+
+          <h3>Metadata</h3>
+          <ul>
+            <li><code>rename old,new</code> - Rename item</li>
+            <li><code>category item,cat</code> - Update category</li>
+            <li><code>expiry item,YYYY-MM-DD</code> - Update expiration date</li>
+          </ul>
+
+          <h3>Search and Views</h3>
+          <ul>
+            <li><code>find term</code> - Filter pantry by item name</li>
+            <li><code>expiring N</code> - Show items expiring within N days</li>
+          </ul>
+
+          <h3>Shopping List</h3>
+          <ul>
+            <li><code>shopping add item1,item2</code> - Add shopping items</li>
+            <li><code>shopping rm item1,item2</code> - Remove shopping items</li>
+            <li><code>shopping list</code> - Show shopping list</li>
+          </ul>
+        </div>
+      </section>
+    </div>
+
+    <div id="about-modal" class="modal hidden" aria-hidden="true" role="dialog" aria-labelledby="about-title">
+      <div id="about-backdrop" class="modal-backdrop"></div>
+      <section class="modal-card">
+        <div class="modal-head">
+          <h2 id="about-title">About arusuvai</h2>
+          <button id="about-close" type="button" class="ghost">Close</button>
+        </div>
+        <div class="modal-body">
+          <p>
+            <strong>Arusuvai (அறுசுவை)</strong> means “six tastes” in Tamil — the idea that a complete, satisfying meal
+            balances sweet, sour, salty, spicy, bitter, and astringent flavors into one harmonious whole.
+          </p>
+        </div>
+      </section>
+    </div>
 
     <script src="/static/chat.js"></script>
   </body>

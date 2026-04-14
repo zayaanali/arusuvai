@@ -83,6 +83,15 @@ body {
   font-size: 0.9rem;
 }
 
+.topbar .nav-btn {
+  border: 1px solid var(--line);
+  background: #f3fbf6;
+  color: var(--ink);
+  border-radius: 999px;
+  padding: 8px 12px;
+  font-size: 0.9rem;
+}
+
 .layout {
   max-width: 1100px;
   margin: 0 auto;
@@ -102,7 +111,9 @@ body {
 .chat-panel {
   display: grid;
   grid-template-rows: auto 1fr auto auto;
-  min-height: 72vh;
+  height: min(72vh, 760px);
+  max-height: 760px;
+  overflow: hidden;
 }
 
 .panel-head {
@@ -146,6 +157,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  min-height: 0;
   overflow-y: auto;
 }
 
@@ -154,6 +166,7 @@ body {
   border-radius: 12px;
   padding: 10px 12px;
   line-height: 1.35;
+  white-space: pre-wrap;
   animation: rise 160ms ease-out;
 }
 
@@ -266,6 +279,77 @@ button {
   font-weight: 600;
 }
 
+.modal.hidden {
+  display: none;
+}
+
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+}
+
+.modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(24, 45, 31, 0.35);
+}
+
+.modal-card {
+  position: relative;
+  z-index: 2;
+  width: min(760px, calc(100vw - 24px));
+  max-height: calc(100vh - 32px);
+  margin: 16px auto;
+  border-radius: 14px;
+  border: 1px solid #bdd7c6;
+  background: #f7fcf8;
+  box-shadow: 0 20px 48px rgba(24, 45, 31, 0.24);
+  overflow: hidden;
+}
+
+.modal-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 14px;
+  border-bottom: 1px solid #d7eadc;
+}
+
+.modal-head h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.modal-body {
+  padding: 14px;
+  overflow: auto;
+  max-height: calc(100vh - 110px);
+}
+
+.modal-body h3 {
+  margin: 14px 0 8px;
+  font-size: 0.95rem;
+}
+
+.modal-body ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.modal-body li {
+  margin: 6px 0;
+  color: var(--ink);
+  line-height: 1.35;
+}
+
+.modal-body code {
+  background: #e7f2eb;
+  border: 1px solid #c9ddcf;
+  padding: 1px 6px;
+  border-radius: 6px;
+}
+
 @keyframes rise {
   from {
     transform: translateY(6px);
@@ -283,7 +367,8 @@ button {
   }
 
   .chat-panel {
-    min-height: 56vh;
+    height: min(60vh, 620px);
+    max-height: 620px;
   }
 
   .pantry-list {
