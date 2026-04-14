@@ -87,8 +87,8 @@ def chat_web_app() -> FileResponse:
     return FileResponse(FRONTEND_DIR / "chat.html")
 
 
-@app.get("/dashboard", include_in_schema=False)
-def dashboard_web_app() -> FileResponse:
+@app.get("/manual", include_in_schema=False)
+def manual_web_app() -> FileResponse:
     return FileResponse(FRONTEND_DIR / "index.html")
 
 
