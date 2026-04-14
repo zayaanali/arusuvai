@@ -302,9 +302,10 @@ async function runManualCommand(message) {
   }
 
   if (parsed.command === "drop_table") {
-    const result = await api("/pantry", { method: "DELETE" });
+    const result = await api("/pantry/clear", { method: "POST" });
+    const deletedCount = Number(result?.deleted ?? 0);
     await refreshPantry();
-    addMessage("bot", `Pantry cleared. Deleted ${result.deleted} item(s).`);
+    addMessage("bot", `Pantry cleared. Deleted ${deletedCount} item(s).`);
     return;
   }
 
