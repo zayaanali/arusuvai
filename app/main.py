@@ -6,9 +6,10 @@ from pathlib import Path
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 from sqlmodel import Session, select
 
-from .db import get_session, init_db
+from .db import engine, get_session, init_db
 from .models import (
     IngredientAlias,
     IngredientAliasCreate,
@@ -40,9 +41,20 @@ DEFAULT_PANTRY_CATEGORY = "uncategorized"
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
+class ChatRequest(BaseModel):
+    message: str
+
+
+class ChatResponse(BaseModel):
+    reply: str
+    refresh_pantry: bool = False
+
+
 @app.on_event("startup")
 def on_startup() -> None:
     init_db()
+    with Session(engine) as session:
+        _dedupe_pantry_items(session)
 
 
 @app.get("/", include_in_schema=False)
@@ -50,9 +62,26 @@ def web_app() -> FileResponse:
     return FileResponse(STATIC_DIR / "index.html")
 
 
+@app.get("/chat", include_in_schema=False)
+def chat_web_app() -> FileResponse:
+    return FileResponse(STATIC_DIR / "chat.html")
+
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.post("/chat", response_model=ChatResponse)
+def chat_endpoint(payload: ChatRequest) -> ChatResponse:
+    # Placeholder endpoint: frontend can toggle AI mode now, then backend logic/LLM can be added later.
+    msg = payload.message.strip()
+    if not msg:
+        return ChatResponse(reply="Message was empty.", refresh_pantry=False)
+    return ChatResponse(
+        reply="AI mode is enabled, but the chatbot backend is not configured yet. Switch off 'Use AI' to run manual commands.",
+        refresh_pantry=False,
+    )
 
 
 def _to_pantry_read(item: PantryItem) -> PantryItemRead:
@@ -79,16 +108,60 @@ def _to_shopping_read(item: ShoppingListItem) -> ShoppingListItemRead:
     )
 
 
+def _dedupe_pantry_items(session: Session) -> None:
+    items = list(session.exec(select(PantryItem).order_by(PantryItem.id)).all())
+    by_name: dict[str, PantryItem] = {}
+    changed = False
+
+    for item in items:
+        key = item.canonical_name.strip().lower()
+        primary = by_name.get(key)
+        if not primary:
+            by_name[key] = item
+            continue
+
+        primary.quantity += item.quantity
+        if (primary.expires_at is None) or (item.expires_at is not None and item.expires_at < primary.expires_at):
+            primary.expires_at = item.expires_at
+        if (not primary.unit or primary.unit == DEFAULT_PANTRY_UNIT) and item.unit:
+            primary.unit = item.unit
+        if (not primary.category or primary.category == DEFAULT_PANTRY_CATEGORY) and item.category:
+            primary.category = item.category
+        primary.updated_at = datetime.utcnow()
+        session.delete(item)
+        session.add(primary)
+        changed = True
+
+    if changed:
+        session.commit()
+
+
 # Pantry
 @app.post("/pantry", response_model=PantryItemRead)
 def create_pantry_item(payload: PantryItemCreate, session: Session = Depends(get_session)):
     if not payload.name.strip():
         raise HTTPException(status_code=400, detail="name cannot be empty")
     canonical = canonicalize_name(session, payload.name)
+    quantity_to_add = payload.quantity if payload.quantity is not None else DEFAULT_PANTRY_QUANTITY
+    existing = session.exec(select(PantryItem).where(PantryItem.canonical_name == canonical)).first()
+    if existing:
+        existing.quantity += quantity_to_add
+        if payload.unit and payload.unit.strip():
+            existing.unit = payload.unit.strip()
+        if payload.category and payload.category.strip():
+            existing.category = payload.category.strip()
+        if payload.expires_at is not None:
+            existing.expires_at = payload.expires_at
+        existing.updated_at = datetime.utcnow()
+        session.add(existing)
+        session.commit()
+        session.refresh(existing)
+        return _to_pantry_read(existing)
+
     item = PantryItem(
         canonical_name=canonical,
         display_name=canonical,
-        quantity=payload.quantity if payload.quantity is not None else DEFAULT_PANTRY_QUANTITY,
+        quantity=quantity_to_add,
         unit=(payload.unit.strip() if payload.unit else DEFAULT_PANTRY_UNIT),
         expires_at=payload.expires_at,
         category=(payload.category.strip() if payload.category else DEFAULT_PANTRY_CATEGORY),
@@ -137,6 +210,11 @@ def update_pantry_item(item_id: int, payload: PantryItemUpdate, session: Session
         if not updates["name"] or not updates["name"].strip():
             raise HTTPException(status_code=400, detail="name cannot be empty")
         updates["canonical_name"] = canonicalize_name(session, updates.pop("name"))
+        duplicate = session.exec(
+            select(PantryItem).where(PantryItem.canonical_name == updates["canonical_name"]).where(PantryItem.id != item.id)
+        ).first()
+        if duplicate:
+            raise HTTPException(status_code=409, detail="Pantry item with this name already exists")
         updates["display_name"] = updates["canonical_name"]
     if "unit" in updates:
         updates["unit"] = updates["unit"].strip() if updates["unit"] else DEFAULT_PANTRY_UNIT
@@ -151,6 +229,17 @@ def update_pantry_item(item_id: int, payload: PantryItemUpdate, session: Session
     session.commit()
     session.refresh(item)
     return _to_pantry_read(item)
+
+
+@app.delete("/pantry")
+def clear_pantry(session: Session = Depends(get_session)):
+    items = list(session.exec(select(PantryItem)).all())
+    count = 0
+    for item in items:
+        session.delete(item)
+        count += 1
+    session.commit()
+    return {"deleted": count}
 
 
 @app.delete("/pantry/{item_id}")

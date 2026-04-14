@@ -1,11 +1,11 @@
 :root {
-  --bg: #f3f1ea;
-  --card: #fffdf7;
-  --ink: #1f2a2c;
-  --muted: #536063;
-  --accent: #1f7a6b;
-  --accent-2: #c76824;
-  --border: #d9d3c6;
+  --bg: #eaf4ee;
+  --card: #f7fcf8;
+  --ink: #1f3a2a;
+  --muted: #527460;
+  --accent: #2f7a4d;
+  --accent-2: #5e9b77;
+  --border: #cbe2d3;
 }
 
 * {
@@ -14,9 +14,9 @@
 
 body {
   margin: 0;
-  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  font-family: "Roboto Mono", "Segoe UI", monospace;
   color: var(--ink);
-  background: radial-gradient(circle at 10% 0%, #fffaf0, var(--bg));
+  background: radial-gradient(circle at 10% 0%, #f4fbf6, var(--bg));
 }
 
 header {
@@ -27,6 +27,7 @@ h1 {
   margin: 0;
   font-size: 2rem;
   letter-spacing: 0.4px;
+  font-weight: 800;
 }
 
 header p {
@@ -66,7 +67,7 @@ button {
   width: 100%;
   padding: 9px;
   border-radius: 8px;
-  border: 1px solid #c5c0b5;
+  border: 1px solid #bed5c6;
   font-size: 0.95rem;
 }
 
@@ -112,8 +113,8 @@ pre {
   margin: 0;
   max-height: 260px;
   overflow: auto;
-  background: #f8f7f4;
-  border: 1px solid #e1dccf;
+  background: #f1f8f3;
+  border: 1px solid #d5e7db;
   border-radius: 8px;
   padding: 10px;
   font-size: 0.8rem;

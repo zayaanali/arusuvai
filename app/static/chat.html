@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>arusuvai</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;500;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/static/chat.css" />
+  </head>
+  <body>
+    <div class="bg-shape bg-shape-1"></div>
+    <div class="bg-shape bg-shape-2"></div>
+
+    <header class="topbar">
+      <div>
+        <h1>arusuvai</h1>
+        <p>Natural commands today, AI agent soon.</p>
+      </div>
+      <nav>
+        <a href="/">Dashboard</a>
+        <a href="/docs" target="_blank" rel="noreferrer">API Docs</a>
+      </nav>
+    </header>
+
+    <main class="layout">
+      <section class="panel chat-panel">
+        <div class="panel-head">
+          <h2>Assistant</h2>
+          <div class="head-controls">
+            <label class="toggle">
+              <input id="use-ai-toggle" type="checkbox" />
+              <span>Use AI</span>
+            </label>
+            <span id="api-status" class="status">Checking API...</span>
+          </div>
+        </div>
+
+        <div id="chat-log" class="chat-log"></div>
+
+        <div class="quick-row">
+          <button class="quick-btn" data-prompt="add green beans,corn">add green beans,corn</button>
+          <button class="quick-btn" data-prompt="rm corn">rm corn</button>
+          <button class="quick-btn" data-prompt="list">list</button>
+          <button class="quick-btn" data-prompt="drop_table">drop_table</button>
+        </div>
+
+        <form id="chat-form" class="chat-form">
+          <input
+            id="chat-input"
+            placeholder="Manual: add item1,item2 | rm item1,item2 | list | drop_table"
+            autocomplete="off"
+            required
+          />
+          <button type="submit">Send</button>
+        </form>
+      </section>
+
+      <aside class="panel pantry-panel">
+        <div class="panel-head">
+          <h2>Pantry Snapshot</h2>
+          <button id="refresh-pantry" class="ghost">Refresh</button>
+        </div>
+
+        <div class="meta" id="pantry-meta">Loading pantry...</div>
+        <div id="pantry-list" class="pantry-list"></div>
+      </aside>
+    </main>
+
+    <script src="/static/chat.js"></script>
+  </body>
+</html>
