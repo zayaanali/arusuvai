@@ -19,6 +19,12 @@ Python-first backend MVP for pantry + recipe management.
 - Shopping list CRUD
 - Ingredient aliases for normalization
 
+## API Contract Notes
+
+- Canonical pantry clear endpoint: `DELETE /pantry`
+- Backward-compat endpoint: `POST /pantry/clear` (deprecated; remove after all clients migrate)
+- Health endpoint: `GET /health` returns `status`, `version`, `environment`, and `git_sha`
+
 ## Run
 
 ```bash

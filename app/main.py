@@ -4,7 +4,7 @@ import os
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -33,7 +33,11 @@ from .models import (
 )
 from .services import canonicalize_name, expiring_cutoff, pantry_name_set, score_recipe
 
-app = FastAPI(title="Pantry Manager MVP", version="0.1.0")
+APP_VERSION = os.getenv("APP_VERSION", "0.1.0")
+DEPLOY_ENV = os.getenv("DEPLOY_ENV", os.getenv("ENVIRONMENT", "unknown"))
+GIT_SHA = os.getenv("GIT_SHA", "unknown")
+
+app = FastAPI(title="Pantry Manager MVP", version=APP_VERSION)
 BASE_DIR = Path(__file__).resolve().parent
 FRONTEND_DIR = BASE_DIR / "frontend"
 DEFAULT_PANTRY_QUANTITY = 1.0
@@ -95,7 +99,12 @@ def manual_web_app() -> FileResponse:
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    return {
+        "status": "ok",
+        "version": APP_VERSION,
+        "environment": DEPLOY_ENV,
+        "git_sha": GIT_SHA,
+    }
 
 
 @app.post("/chat", response_model=ChatResponse)
@@ -268,8 +277,11 @@ def clear_pantry(session: Session = Depends(get_session)):
     return {"deleted": count}
 
 
-@app.post("/pantry/clear")
-def clear_pantry_via_post(session: Session = Depends(get_session)):
+@app.post("/pantry/clear", deprecated=True)
+def clear_pantry_via_post(response: Response, session: Session = Depends(get_session)):
+    response.headers["Deprecation"] = "true"
+    response.headers["Sunset"] = "Wed, 30 Sep 2026 00:00:00 GMT"
+    response.headers["Link"] = '</pantry>; rel="successor-version"'
     return clear_pantry(session)
 
 

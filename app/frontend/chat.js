@@ -135,22 +135,6 @@ async function api(path, options = {}) {
   return data;
 }
 
-async function clearPantryRequest() {
-  let lastError = null;
-  const attempts = [
-    () => api("/pantry/clear", { method: "POST" }),
-    () => api("/pantry", { method: "DELETE" }),
-  ];
-  for (const attempt of attempts) {
-    try {
-      return await attempt();
-    } catch (err) {
-      lastError = err;
-    }
-  }
-  throw lastError || new Error("Failed to clear pantry");
-}
-
 function normalizeName(input) {
   return input.trim().toLowerCase().replace(/\s+/g, " ");
 }
@@ -318,7 +302,7 @@ async function runManualCommand(message) {
   }
 
   if (parsed.command === "drop_table") {
-    const result = await clearPantryRequest();
+    const result = await api("/pantry", { method: "DELETE" });
     const deletedCount = Number(result?.deleted ?? 0);
     await refreshPantry();
     addMessage("bot", `Pantry cleared. Deleted ${deletedCount} item(s).`);
