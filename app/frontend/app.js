@@ -2,27 +2,18 @@ const systemOutput = document.getElementById("system-output");
 const pantryOutput = document.getElementById("pantry-output");
 const recipeOutput = document.getElementById("recipe-output");
 const shoppingOutput = document.getElementById("shopping-output");
-const DEFAULT_API_BASE_URL = "https://api.arusuvai.com";
-const API_BASE_URLS = [DEFAULT_API_BASE_URL];
+const API_BASE_URL = "/api";
 
-function apiUrl(baseUrl, path) {
-  return `${baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
+function apiUrl(path) {
+  return `${API_BASE_URL}${path.startsWith("/") ? path : `/${path}`}`;
 }
 
-async function fetchWithFallback(path, options) {
-  let lastError = null;
-  for (const baseUrl of API_BASE_URLS) {
-    try {
-      return await fetch(apiUrl(baseUrl, path), options);
-    } catch (err) {
-      lastError = err;
-    }
-  }
-  throw lastError || new Error("NetworkError");
+async function fetchApi(path, options) {
+  return fetch(apiUrl(path), options);
 }
 
 async function api(path, options = {}) {
-  const res = await fetchWithFallback(path, {
+  const res = await fetchApi(path, {
     headers: { "Content-Type": "application/json" },
     ...options,
   });

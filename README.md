@@ -24,6 +24,21 @@ Python-first backend MVP for pantry + recipe management.
 - Canonical pantry clear endpoint: `DELETE /pantry`
 - Backward-compat endpoint: `POST /pantry/clear` (deprecated; remove after all clients migrate)
 - Health endpoint: `GET /health` returns `status`, `version`, `environment`, and `git_sha`
+- Frontend calls API through relative `/api/*` paths
+- Backend supports `/api/*` by rewriting `/api/...` to existing routes
+
+## Robust Deployment Pattern
+
+- Serve frontend and API under one origin
+- Route UI at `/` and API at `/api/*`
+- Keep frontend API base as relative `/api` only (no host fallbacks)
+- Gate deploys with smoke checks that validate JSON endpoints
+
+## Pre-Deploy Smoke Check
+
+```bash
+./scripts/smoke_api.sh http://127.0.0.1:8000
+```
 
 ## Run
 
@@ -37,7 +52,7 @@ uvicorn app.main:app --reload
 Open:
 
 - http://127.0.0.1:8000/
-- http://127.0.0.1:8000/docs
+- http://127.0.0.1:8000/api/docs
 
 If you are on an SSH server and want remote browser access:
 
