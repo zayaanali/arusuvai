@@ -2,8 +2,8 @@ const systemOutput = document.getElementById("system-output");
 const pantryOutput = document.getElementById("pantry-output");
 const recipeOutput = document.getElementById("recipe-output");
 const shoppingOutput = document.getElementById("shopping-output");
-const DEFAULT_API_BASE_URL = "https://api.arusuvai.com";
-const API_BASE_URLS = [DEFAULT_API_BASE_URL];
+const DEFAULT_API_BASE_URL = "https://arusuvai.pages.dev";
+const API_BASE_URLS = Array.from(new Set([DEFAULT_API_BASE_URL, "https://api.arusuvai.com", window.location.origin]));
 
 function apiUrl(baseUrl, path) {
   return `${baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
