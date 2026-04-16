@@ -7,11 +7,11 @@ check_json() {
   local url="$1"
   local body
   body="$(curl -fsS "$url")"
-  python3 -c 'import json,sys; json.loads(sys.stdin.read())' <<<"$body" >/dev/null
+  node -e 'JSON.parse(require("fs").readFileSync(0, "utf8"));' <<<"$body" >/dev/null
 }
 
-echo "Checking API health at ${BASE_URL}/api/health"
-check_json "${BASE_URL}/api/health"
+echo "Checking API health at ${BASE_URL}/health"
+check_json "${BASE_URL}/health"
 
 echo "Checking pantry list at ${BASE_URL}/api/pantry"
 check_json "${BASE_URL}/api/pantry"

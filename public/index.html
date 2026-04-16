@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Pantry Manager</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <header>
+        <h1>Pantry Manager</h1>
+        <p>Simple pantry, recipes, and shopping list app</p>
+      </header>
+
+      <section class="card">
+        <h2>Pantry</h2>
+        <form id="pantry-form" class="row">
+          <input name="name" placeholder="name" required />
+          <input name="quantity" type="number" step="0.01" placeholder="qty" />
+          <input name="unit" placeholder="unit" />
+          <input name="category" placeholder="category" />
+          <input name="expires_at" type="date" />
+          <button type="submit">Add</button>
+        </form>
+        <div class="row">
+          <button id="refresh-pantry" type="button">Refresh Pantry</button>
+          <button id="clear-pantry" type="button">Clear Pantry</button>
+          <button id="expiring-7" type="button">Expiring 7d</button>
+        </div>
+        <pre id="pantry-output"></pre>
+      </section>
+
+      <section class="card">
+        <h2>Shopping List</h2>
+        <form id="shopping-form" class="row">
+          <input name="name" placeholder="name" required />
+          <input name="quantity" type="number" step="0.01" placeholder="qty" />
+          <input name="unit" placeholder="unit" />
+          <button type="submit">Add</button>
+        </form>
+        <button id="refresh-shopping" type="button">Refresh Shopping</button>
+        <pre id="shopping-output"></pre>
+      </section>
+
+      <section class="card">
+        <h2>Recipes</h2>
+        <form id="recipe-form" class="row">
+          <input name="title" placeholder="title" required />
+          <textarea name="instructions" placeholder="instructions" rows="3" required></textarea>
+          <button type="submit">Create</button>
+        </form>
+        <button id="refresh-recipes" type="button">Refresh Recipes</button>
+        <pre id="recipes-output"></pre>
+      </section>
+
+      <section class="card">
+        <h2>AI Backend (Stub)</h2>
+        <form id="ai-form" class="row">
+          <input name="message" placeholder="Ask AI..." required />
+          <button type="submit">Send</button>
+        </form>
+        <pre id="ai-output"></pre>
+      </section>
+
+      <section class="card">
+        <h2>System</h2>
+        <pre id="system-output"></pre>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
