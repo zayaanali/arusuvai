@@ -13,8 +13,7 @@ const aboutBtn = document.getElementById("about-btn");
 const aboutModal = document.getElementById("about-modal");
 const aboutBackdrop = document.getElementById("about-backdrop");
 const aboutCloseBtn = document.getElementById("about-close");
-const DEFAULT_API_BASE_URL = "https://api.arusuvai.com";
-const API_BASE_URLS = [DEFAULT_API_BASE_URL];
+const API_BASE_URL = "/api";
 const MANUAL_HELP =
   "Type `help` any time to see all commands.";
 const HELP_TEXT = `Manual Commands
@@ -101,24 +100,16 @@ function addMessage(role, text) {
   chatLog.scrollTop = chatLog.scrollHeight;
 }
 
-function apiUrl(baseUrl, path) {
-  return `${baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
+function apiUrl(path) {
+  return `${API_BASE_URL}${path.startsWith("/") ? path : `/${path}`}`;
 }
 
-async function fetchWithFallback(path, options) {
-  let lastError = null;
-  for (const baseUrl of API_BASE_URLS) {
-    try {
-      return await fetch(apiUrl(baseUrl, path), options);
-    } catch (err) {
-      lastError = err;
-    }
-  }
-  throw lastError || new Error("NetworkError");
+async function fetchApi(path, options) {
+  return fetch(apiUrl(path), options);
 }
 
 async function api(path, options = {}) {
-  const res = await fetchWithFallback(path, {
+  const res = await fetchApi(path, {
     headers: { "Content-Type": "application/json" },
     ...options,
   });
