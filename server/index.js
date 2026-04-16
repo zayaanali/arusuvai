@@ -41,6 +41,14 @@ app.get("/health", (_req, res) => {
   });
 });
 
+app.get("/api/health", (_req, res) => {
+  res.json({
+    status: "ok",
+    version: process.env.APP_VERSION || "1.0.0",
+    environment: process.env.NODE_ENV || "development",
+  });
+});
+
 app.post("/api/ai/chat", async (req, res) => {
   const message = String(req.body?.message || "").trim();
   if (!message) return badRequest(res, "message is required");
@@ -307,6 +315,10 @@ app.delete("/api/shopping-list/:id", async (req, res, next) => {
   } catch (err) {
     next(err);
   }
+});
+
+app.get("/manual", (_req, res) => {
+  res.sendFile(path.join(process.cwd(), "public", "manual.html"));
 });
 
 app.get("*", (_req, res) => {

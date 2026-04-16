@@ -3,78 +3,140 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Pantry Manager</title>
-    <link rel="stylesheet" href="/styles.css" />
+    <title>arusuvai</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;500;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/chat.css" />
   </head>
   <body>
-    <main class="container">
-      <header>
-        <h1>Pantry Manager</h1>
-        <p>Chat-first pantry assistant with management tools</p>
-      </header>
+    <div class="bg-shape bg-shape-1"></div>
+    <div class="bg-shape bg-shape-2"></div>
 
-      <section class="card chat-card">
-        <h2>AI Chat</h2>
-        <p class="section-note">This is the main page. Start here to ask questions or plan meals from your pantry.</p>
-        <form id="ai-form" class="chat-row">
-          <input name="message" placeholder="Ask AI..." required />
+    <header class="topbar">
+      <div>
+        <h1>arusuvai</h1>
+        <p>balance is not one flavor — it is all in harmony</p>
+      </div>
+      <nav>
+        <a href="/manual">Manual</a>
+        <a href="/health" target="_blank" rel="noreferrer">Health</a>
+        <button id="help-btn" type="button" class="nav-btn">Help</button>
+        <button id="about-btn" type="button" class="nav-btn">About</button>
+      </nav>
+    </header>
+
+    <main class="layout">
+      <section class="panel chat-panel">
+        <div class="panel-head">
+          <h2>Assistant</h2>
+          <div class="head-controls">
+            <label class="toggle">
+              <input id="use-ai-toggle" type="checkbox" />
+              <span>Use AI</span>
+            </label>
+            <span id="api-status" class="status">Checking API...</span>
+          </div>
+        </div>
+
+        <div id="chat-log" class="chat-log"></div>
+
+        <div class="quick-row">
+          <button class="quick-btn" data-prompt="add green beans,corn">add green beans,corn</button>
+          <button class="quick-btn" data-prompt="list">list</button>
+          <button class="quick-btn" data-prompt="shopping list">shopping list</button>
+          <button class="quick-btn" data-prompt="help">help</button>
+        </div>
+
+        <form id="chat-form" class="chat-form">
+          <input
+            id="chat-input"
+            placeholder="Manual mode commands enabled (add, rm, list, set, use, discard, rename, category, expiry, inc/dec, find, expiring, shopping)"
+            autocomplete="off"
+            required
+          />
           <button type="submit">Send</button>
         </form>
-        <pre id="ai-output"></pre>
       </section>
 
-      <section class="card">
-        <h2>Pantry Tools</h2>
-        <p class="section-note">Use these forms to manage pantry, shopping list, and recipes.</p>
-      </section>
-
-      <section class="card">
-        <h2>Pantry</h2>
-        <form id="pantry-form" class="row">
-          <input name="name" placeholder="name" required />
-          <input name="quantity" type="number" step="0.01" placeholder="qty" />
-          <input name="unit" placeholder="unit" />
-          <input name="category" placeholder="category" />
-          <input name="expires_at" type="date" />
-          <button type="submit">Add</button>
-        </form>
-        <div class="row">
-          <button id="refresh-pantry" type="button">Refresh Pantry</button>
-          <button id="clear-pantry" type="button">Clear Pantry</button>
-          <button id="expiring-7" type="button">Expiring 7d</button>
+      <aside class="panel pantry-panel">
+        <div class="panel-head">
+          <h2>Pantry Snapshot</h2>
+          <button id="refresh-pantry" class="ghost">Refresh</button>
         </div>
-        <pre id="pantry-output"></pre>
-      </section>
 
-      <section class="card">
-        <h2>Shopping List</h2>
-        <form id="shopping-form" class="row">
-          <input name="name" placeholder="name" required />
-          <input name="quantity" type="number" step="0.01" placeholder="qty" />
-          <input name="unit" placeholder="unit" />
-          <button type="submit">Add</button>
-        </form>
-        <button id="refresh-shopping" type="button">Refresh Shopping</button>
-        <pre id="shopping-output"></pre>
-      </section>
-
-      <section class="card">
-        <h2>Recipes</h2>
-        <form id="recipe-form" class="row">
-          <input name="title" placeholder="title" required />
-          <textarea name="instructions" placeholder="instructions" rows="3" required></textarea>
-          <button type="submit">Create</button>
-        </form>
-        <button id="refresh-recipes" type="button">Refresh Recipes</button>
-        <pre id="recipes-output"></pre>
-      </section>
-
-      <section class="card">
-        <h2>System</h2>
-        <pre id="system-output"></pre>
-      </section>
+        <div class="meta" id="pantry-meta">Loading pantry...</div>
+        <div id="pantry-list" class="pantry-list"></div>
+      </aside>
     </main>
 
-    <script src="/app.js"></script>
+    <div id="help-modal" class="modal hidden" aria-hidden="true" role="dialog" aria-labelledby="help-title">
+      <div id="help-backdrop" class="modal-backdrop"></div>
+      <section class="modal-card">
+        <div class="modal-head">
+          <h2 id="help-title">Manual Commands</h2>
+          <button id="help-close" type="button" class="ghost">Close</button>
+        </div>
+        <div class="modal-body">
+          <h3>Pantry Basics</h3>
+          <ul>
+            <li><code>add item1,item2</code> - Add all comma-separated items</li>
+            <li><code>rm item1,item2</code> - Remove matching pantry items</li>
+            <li><code>list</code> - Show all pantry items in snapshot</li>
+            <li><code>drop_table</code> - Clear entire pantry</li>
+          </ul>
+
+          <h3>Inventory Updates</h3>
+          <ul>
+            <li><code>set item,qty,category</code> - Set quantity and category</li>
+            <li><code>use item,qty</code> - Subtract quantity</li>
+            <li><code>discard item,qty</code> - Subtract quantity (same as use for now)</li>
+            <li><code>inc item,qty</code> - Increase quantity</li>
+            <li><code>dec item,qty</code> - Decrease quantity</li>
+          </ul>
+
+          <h3>Metadata</h3>
+          <ul>
+            <li><code>rename old,new</code> - Rename item</li>
+            <li><code>category item,cat</code> - Update category</li>
+            <li><code>expiry item,YYYY-MM-DD</code> - Update expiration date</li>
+          </ul>
+
+          <h3>Search and Views</h3>
+          <ul>
+            <li><code>find term</code> - Filter pantry by item name</li>
+            <li><code>expiring N</code> - Show items expiring within N days</li>
+          </ul>
+
+          <h3>Shopping List</h3>
+          <ul>
+            <li><code>shopping add item1,item2</code> - Add shopping items</li>
+            <li><code>shopping rm item1,item2</code> - Remove shopping items</li>
+            <li><code>shopping list</code> - Show shopping list</li>
+          </ul>
+        </div>
+      </section>
+    </div>
+
+    <div id="about-modal" class="modal hidden" aria-hidden="true" role="dialog" aria-labelledby="about-title">
+      <div id="about-backdrop" class="modal-backdrop"></div>
+      <section class="modal-card">
+        <div class="modal-head">
+          <h2 id="about-title">About arusuvai</h2>
+          <button id="about-close" type="button" class="ghost">Close</button>
+        </div>
+        <div class="modal-body">
+          <p>
+            <strong>Arusuvai (அறுசுவை)</strong> means “six tastes” in Tamil — the idea that a complete, satisfying meal
+            balances sweet, sour, salty, spicy, bitter, and astringent flavors into one harmonious whole.
+          </p>
+        </div>
+      </section>
+    </div>
+
+    <script src="/chat.js"></script>
   </body>
 </html>
