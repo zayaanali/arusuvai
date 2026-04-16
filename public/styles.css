@@ -42,14 +42,32 @@ header p {
   padding: 14px;
 }
 
+.chat-card {
+  border-color: #9bb7cc;
+  box-shadow: 0 10px 24px rgba(42, 95, 138, 0.12);
+}
+
 h2 {
   margin-top: 0;
+}
+
+.section-note {
+  margin: -2px 0 10px;
+  color: var(--muted);
+  font-size: 0.95rem;
 }
 
 .row {
   display: grid;
   gap: 8px;
   grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  margin-bottom: 8px;
+}
+
+.chat-row {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 1fr auto;
   margin-bottom: 8px;
 }
 
@@ -79,4 +97,14 @@ pre {
   min-height: 44px;
   max-height: 280px;
   overflow: auto;
+}
+
+#ai-output {
+  min-height: 140px;
+}
+
+@media (max-width: 640px) {
+  .chat-row {
+    grid-template-columns: 1fr;
+  }
 }

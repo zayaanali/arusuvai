@@ -28,7 +28,13 @@ npm install
 npm run dev
 ```
 
-Open `http://127.0.0.1:8000`.
+Open `http://127.0.0.1:18001`.
+
+If you want a different port:
+
+```bash
+PORT=8000 npm run dev
+```
 
 ## API overview
 
