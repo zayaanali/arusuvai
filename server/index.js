@@ -11,7 +11,7 @@ const {
 
 const app = express();
 const port = Number(process.env.PORT || 8000);
-const host = process.env.HOST || "127.0.0.1";
+const host = process.env.HOST || "0.0.0.0";
 
 app.use(express.json());
 app.use(express.static(path.join(process.cwd(), "public")));
@@ -320,8 +320,15 @@ app.use((err, _req, res, _next) => {
 
 initDb()
   .then(() => {
-    app.listen(port, host, () => {
+    const server = app.listen(port, host, () => {
       console.log(`Pantry Manager running at http://${host}:${port}`);
+    });
+    server.on("error", (err) => {
+      if (err && err.code === "EADDRINUSE") {
+        console.error(`Port ${port} is already in use on ${host}. Set PORT to another value and retry.`);
+        process.exit(1);
+      }
+      throw err;
     });
   })
   .catch((err) => {

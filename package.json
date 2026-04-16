@@ -5,7 +5,7 @@
   "description": "Simple pantry manager website with Express + SQLite",
   "main": "server/index.js",
   "scripts": {
-    "dev": "node --watch server/index.js",
+    "dev": "PORT=${PORT:-18001} HOST=${HOST:-0.0.0.0} node --watch server/index.js",
     "start": "node server/index.js"
   },
   "dependencies": {
