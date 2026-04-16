@@ -3,7 +3,7 @@ const pantryOutput = document.getElementById("pantry-output");
 const recipeOutput = document.getElementById("recipe-output");
 const shoppingOutput = document.getElementById("shopping-output");
 const DEFAULT_API_BASE_URL = "https://api.arusuvai.com";
-const API_BASE_URLS = Array.from(new Set([DEFAULT_API_BASE_URL, window.location.origin]));
+const API_BASE_URLS = [DEFAULT_API_BASE_URL];
 
 function apiUrl(baseUrl, path) {
   return `${baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
