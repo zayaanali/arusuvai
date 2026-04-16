@@ -14,7 +14,7 @@ const aboutModal = document.getElementById("about-modal");
 const aboutBackdrop = document.getElementById("about-backdrop");
 const aboutCloseBtn = document.getElementById("about-close");
 const DEFAULT_API_BASE_URL = "https://api.arusuvai.com";
-const API_BASE_URLS = Array.from(new Set([DEFAULT_API_BASE_URL, window.location.origin]));
+const API_BASE_URLS = [DEFAULT_API_BASE_URL];
 const MANUAL_HELP =
   "Type `help` any time to see all commands.";
 const HELP_TEXT = `Manual Commands
@@ -606,8 +606,19 @@ async function runAiMode(message) {
   }
 }
 
+function isManualCommandMessage(message) {
+  const trimmed = message.trim();
+  if (!trimmed) return false;
+  if (/^shopping\s+(add|rm|list)\b/i.test(trimmed)) return true;
+  return parseManualCommand(trimmed) !== null;
+}
+
 async function handleChat(message) {
   addMessage("user", message);
+  if (isManualCommandMessage(message)) {
+    await runManualCommand(message);
+    return;
+  }
   if (useAiToggle.checked) {
     await runAiMode(message);
   } else {
@@ -691,6 +702,8 @@ useAiToggle.addEventListener("change", () => {
 });
 
 (async function init() {
+  // Force a predictable startup mode; some browsers may restore prior toggle state.
+  useAiToggle.checked = false;
   addMessage("bot", `Manual mode ready. ${MANUAL_HELP}`);
   try {
     await api("/health");
