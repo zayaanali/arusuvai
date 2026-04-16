@@ -13,8 +13,8 @@ const aboutBtn = document.getElementById("about-btn");
 const aboutModal = document.getElementById("about-modal");
 const aboutBackdrop = document.getElementById("about-backdrop");
 const aboutCloseBtn = document.getElementById("about-close");
-const DEFAULT_API_BASE_URL = "https://arusuvai.pages.dev";
-const API_BASE_URLS = Array.from(new Set([DEFAULT_API_BASE_URL, "https://api.arusuvai.com", window.location.origin]));
+const DEFAULT_API_BASE_URL = "https://api.arusuvai.com";
+const API_BASE_URLS = [DEFAULT_API_BASE_URL];
 const MANUAL_HELP =
   "Type `help` any time to see all commands.";
 const HELP_TEXT = `Manual Commands
@@ -123,11 +123,11 @@ async function api(path, options = {}) {
     ...options,
   });
   const text = await res.text();
-  let data = text;
+  let data = null;
   try {
-    data = JSON.parse(text);
+    data = text ? JSON.parse(text) : null;
   } catch {
-    // keep text
+    throw new Error(`Non-JSON API response for ${path}. Check API base URL.`);
   }
   if (!res.ok) {
     throw new Error(typeof data === "string" ? data : JSON.stringify(data));
