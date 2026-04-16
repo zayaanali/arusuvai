@@ -1,0 +1,110 @@
+:root {
+  --bg: #f5f5f1;
+  --surface: #ffffff;
+  --ink: #1e1e1b;
+  --muted: #5b5a54;
+  --line: #d9d7cf;
+  --accent: #2a5f8a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Segoe UI", Tahoma, sans-serif;
+  color: var(--ink);
+  background: linear-gradient(160deg, #ecebe4 0%, var(--bg) 65%);
+}
+
+.container {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 24px 16px 40px;
+  display: grid;
+  gap: 14px;
+}
+
+header h1 {
+  margin: 0;
+}
+
+header p {
+  margin: 6px 0 0;
+  color: var(--muted);
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 14px;
+}
+
+.chat-card {
+  border-color: #9bb7cc;
+  box-shadow: 0 10px 24px rgba(42, 95, 138, 0.12);
+}
+
+h2 {
+  margin-top: 0;
+}
+
+.section-note {
+  margin: -2px 0 10px;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.row {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  margin-bottom: 8px;
+}
+
+.chat-row {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 1fr auto;
+  margin-bottom: 8px;
+}
+
+input,
+textarea,
+button {
+  width: 100%;
+  border: 1px solid #c9c6bd;
+  border-radius: 8px;
+  padding: 10px;
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+pre {
+  margin: 0;
+  background: #f9f8f3;
+  border: 1px solid #dddacf;
+  border-radius: 8px;
+  padding: 10px;
+  min-height: 44px;
+  max-height: 280px;
+  overflow: auto;
+}
+
+#ai-output {
+  min-height: 140px;
+}
+
+@media (max-width: 640px) {
+  .chat-row {
+    grid-template-columns: 1fr;
+  }
+}
