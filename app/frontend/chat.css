@@ -194,6 +194,31 @@ body {
   border: 1px solid #c8e2cf;
 }
 
+.msg p {
+  margin: 0;
+}
+
+.msg p + p {
+  margin-top: 8px;
+}
+
+.msg ol,
+.msg ul {
+  margin: 6px 0 0 1.2rem;
+  padding: 0;
+}
+
+.msg li + li {
+  margin-top: 4px;
+}
+
+.msg code {
+  font-family: "Roboto Mono", monospace;
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 6px;
+  padding: 0 4px;
+}
+
 .quick-row {
   display: flex;
   gap: 8px;
