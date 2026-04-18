@@ -15,6 +15,8 @@ const aboutBackdrop = document.getElementById("about-backdrop");
 const aboutCloseBtn = document.getElementById("about-close");
 const API_BASE_URL = "/api";
 const userMessageHistory = [];
+let lastPantryItems = [];
+let editingPantryItemId = null;
 const MANUAL_HELP =
   "Type `help` any time to see all commands.";
 const HELP_TEXT = `Manual Commands
@@ -245,6 +247,20 @@ function daysUntil(dateStr) {
   return Math.round(ms / 86400000);
 }
 
+function isValidDateInput(value) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(new Date(`${value}T00:00:00`).getTime());
+}
+
+function startEditingPantryItem(itemId) {
+  editingPantryItemId = itemId;
+  renderPantry(lastPantryItems);
+}
+
+function stopEditingPantryItem() {
+  editingPantryItemId = null;
+  renderPantry(lastPantryItems);
+}
+
 function renderPantry(items) {
   pantryList.innerHTML = "";
 
@@ -264,6 +280,7 @@ function renderPantry(items) {
   for (const item of sorted) {
     const card = document.createElement("div");
     card.className = "pantry-item";
+    const isEditing = editingPantryItemId === item.id;
 
     const days = daysUntil(item.expires_at);
     const expiryLine = !item.expires_at
@@ -280,12 +297,96 @@ function renderPantry(items) {
       <p>${expiryLine}</p>
       <span class="tag">${item.category}</span>
     `;
+
+    const actions = document.createElement("div");
+    actions.className = "pantry-actions";
+    const editBtn = document.createElement("button");
+    editBtn.type = "button";
+    editBtn.className = "ghost pantry-edit-btn";
+    editBtn.textContent = isEditing ? "Close" : "Edit";
+    editBtn.addEventListener("click", () => {
+      if (isEditing) {
+        stopEditingPantryItem();
+        return;
+      }
+      startEditingPantryItem(item.id);
+    });
+    actions.appendChild(editBtn);
+    card.appendChild(actions);
+
+    if (isEditing) {
+      const form = document.createElement("form");
+      form.className = "pantry-edit-form";
+      form.innerHTML = `
+        <label>
+          Category
+          <input name="category" value="${escapeHtml(item.category || "")}" placeholder="uncategorized" />
+        </label>
+        <label>
+          Unit
+          <input name="unit" value="${escapeHtml(item.unit || "")}" placeholder="unit" />
+        </label>
+        <label>
+          Expiry
+          <input name="expires_at" type="date" value="${escapeHtml(item.expires_at || "")}" />
+        </label>
+        <div class="pantry-edit-actions">
+          <button type="submit">Save</button>
+          <button type="button" class="ghost pantry-cancel-btn">Cancel</button>
+        </div>
+      `;
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const categoryInput = String(form.elements.category?.value || "");
+        const unitInput = String(form.elements.unit?.value || "");
+        const expiryInput = String(form.elements.expires_at?.value || "").trim();
+        const category = normalizeName(categoryInput) || "uncategorized";
+        const unit = normalizeName(unitInput) || "unit";
+        if (expiryInput && !isValidDateInput(expiryInput)) {
+          addMessage("bot", "Date must be YYYY-MM-DD.");
+          return;
+        }
+
+        const buttons = Array.from(form.querySelectorAll("button"));
+        buttons.forEach((btn) => {
+          btn.disabled = true;
+        });
+        try {
+          await api(`/pantry/${item.id}`, {
+            method: "PATCH",
+            body: JSON.stringify({
+              category,
+              unit,
+              expires_at: expiryInput || null,
+            }),
+          });
+          editingPantryItemId = null;
+          await refreshPantry();
+          addMessage("bot", `Updated ${displayName(item)}: category=${category}, unit=${unit}, expiry=${expiryInput || "none"}.`);
+        } catch (err) {
+          addMessage("bot", `Failed to update ${displayName(item)}: ${err.message}`);
+          buttons.forEach((btn) => {
+            btn.disabled = false;
+          });
+        }
+      });
+
+      form.querySelector(".pantry-cancel-btn")?.addEventListener("click", () => {
+        stopEditingPantryItem();
+      });
+      card.appendChild(form);
+    }
     pantryList.appendChild(card);
   }
 }
 
 async function refreshPantry() {
   const items = await api("/pantry");
+  lastPantryItems = items;
+  if (editingPantryItemId && !items.some((item) => item.id === editingPantryItemId)) {
+    editingPantryItemId = null;
+  }
   renderPantry(items);
   return items;
 }
