@@ -14,6 +14,7 @@ const aboutModal = document.getElementById("about-modal");
 const aboutBackdrop = document.getElementById("about-backdrop");
 const aboutCloseBtn = document.getElementById("about-close");
 const API_BASE_URL = "/api";
+const userMessageHistory = [];
 const MANUAL_HELP =
   "Type `help` any time to see all commands.";
 const HELP_TEXT = `Manual Commands
@@ -92,10 +93,77 @@ Support
 - help
   Shows this guide.`;
 
+function escapeHtml(value) {
+  return String(value || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function formatInlineMarkdown(value) {
+  return escapeHtml(value)
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/`([^`]+)`/g, "<code>$1</code>");
+}
+
+function renderBotMessageHtml(text) {
+  const lines = String(text || "").replace(/\r\n/g, "\n").split("\n");
+  const chunks = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i].trim();
+    if (!line) {
+      i += 1;
+      continue;
+    }
+
+    if (/^\d+\.\s+/.test(line)) {
+      const items = [];
+      while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) {
+        items.push(lines[i].replace(/^\s*\d+\.\s+/, "").trim());
+        i += 1;
+      }
+      chunks.push(`<ol>${items.map((item) => `<li>${formatInlineMarkdown(item)}</li>`).join("")}</ol>`);
+      continue;
+    }
+
+    if (/^[-*]\s+/.test(line)) {
+      const items = [];
+      while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) {
+        items.push(lines[i].replace(/^\s*[-*]\s+/, "").trim());
+        i += 1;
+      }
+      chunks.push(`<ul>${items.map((item) => `<li>${formatInlineMarkdown(item)}</li>`).join("")}</ul>`);
+      continue;
+    }
+
+    const paragraph = [];
+    while (
+      i < lines.length &&
+      lines[i].trim() &&
+      !/^\s*\d+\.\s+/.test(lines[i]) &&
+      !/^\s*[-*]\s+/.test(lines[i])
+    ) {
+      paragraph.push(lines[i].trim());
+      i += 1;
+    }
+    chunks.push(`<p>${formatInlineMarkdown(paragraph.join(" "))}</p>`);
+  }
+
+  return chunks.join("");
+}
+
 function addMessage(role, text) {
   const el = document.createElement("div");
   el.className = `msg ${role}`;
-  el.textContent = text;
+  if (role === "bot") {
+    el.innerHTML = renderBotMessageHtml(text);
+  } else {
+    el.textContent = text;
+  }
   chatLog.appendChild(el);
   chatLog.scrollTop = chatLog.scrollHeight;
 }
@@ -586,7 +654,7 @@ async function runManualCommand(message) {
 async function runAiMode(message) {
   const data = await api("/ai/chat", {
     method: "POST",
-    body: JSON.stringify({ message }),
+    body: JSON.stringify({ message, history: userMessageHistory }),
   });
 
   addMessage("bot", data.reply || "AI response received.");
@@ -595,24 +663,14 @@ async function runAiMode(message) {
   }
 }
 
-function isManualCommandMessage(message) {
-  const trimmed = message.trim();
-  if (!trimmed) return false;
-  if (/^shopping\s+(add|rm|list)\b/i.test(trimmed)) return true;
-  return parseManualCommand(trimmed) !== null;
-}
-
 async function handleChat(message) {
   addMessage("user", message);
-  if (isManualCommandMessage(message)) {
-    await runManualCommand(message);
-    return;
-  }
+  userMessageHistory.push(message);
   if (useAiToggle.checked) {
     await runAiMode(message);
-  } else {
-    await runManualCommand(message);
+    return;
   }
+  await runManualCommand(message);
 }
 
 chatForm.addEventListener("submit", async (e) => {

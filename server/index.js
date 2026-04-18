@@ -48,7 +48,31 @@ function badRequest(res, message) {
   return res.status(400).json({ error: message });
 }
 
-async function requestAiPlan(message, selectedModel) {
+function sanitizeChatHistory(rawHistory) {
+  if (!Array.isArray(rawHistory)) return [];
+  const cleaned = [];
+  for (const item of rawHistory) {
+    if (typeof item === "string") {
+      const content = item.trim();
+      if (content) cleaned.push({ role: "user", content });
+      continue;
+    }
+    if (!item || typeof item !== "object") continue;
+    const role = item.role === "assistant" ? "assistant" : "user";
+    const content = String(item.content || "").trim();
+    if (!content) continue;
+    cleaned.push({ role, content });
+  }
+  return cleaned;
+}
+
+async function requestAiPlan({ message, selectedModel, history, pantrySnapshot }) {
+  let priorMessages = Array.isArray(history) ? [...history] : [];
+  const last = priorMessages[priorMessages.length - 1];
+  if (last?.role === "user" && String(last.content || "").trim() === String(message || "").trim()) {
+    priorMessages = priorMessages.slice(0, -1);
+  }
+
   return openai.chat.completions.create({
     model: selectedModel,
     response_format: { type: "json_object" },
@@ -70,9 +94,16 @@ async function requestAiPlan(message, selectedModel) {
           "- If user asks to remove/delete pantry items, use intent=remove_pantry with names.",
           "- If user asks to list/show pantry, use intent=list_pantry.",
           "- If user asks to clear all pantry, use intent=clear_pantry.",
+          "- Use prior user/assistant messages as conversation context.",
+          "- Use pantry snapshot context to resolve references like 'it', 'them', or 'same as before'.",
           "- Otherwise use intent=reply with concise helpful text.",
         ].join("\n"),
       },
+      {
+        role: "system",
+        content: `Current pantry snapshot JSON:\n${JSON.stringify(Array.isArray(pantrySnapshot) ? pantrySnapshot : [])}`,
+      },
+      ...priorMessages,
       {
         role: "user",
         content: message,
@@ -152,10 +183,14 @@ app.post("/api/ai/chat", async (req, res, next) => {
     const message = String(req.body?.message || "").trim();
     if (!message) return badRequest(res, "message is required");
     if (!openai) return res.status(500).json({ error: "OPENROUTER_API_KEY is not set" });
+    const history = sanitizeChatHistory(req.body?.history);
+    const pantrySnapshot = await all(
+      "SELECT name, quantity, unit, category, expires_at FROM pantry_items ORDER BY updated_at ASC, id ASC"
+    );
 
     let response;
     try {
-      response = await requestAiPlan(message, model);
+      response = await requestAiPlan({ message, selectedModel: model, history, pantrySnapshot });
     } catch (primaryErr) {
       const isProviderUnavailable =
         primaryErr?.status === 502 ||
@@ -166,7 +201,7 @@ app.post("/api/ai/chat", async (req, res, next) => {
       if (!(isProviderUnavailable && canFallback)) {
         throw primaryErr;
       }
-      response = await requestAiPlan(message, fallbackModel);
+      response = await requestAiPlan({ message, selectedModel: fallbackModel, history, pantrySnapshot });
     }
 
     const raw = response.choices?.[0]?.message?.content || "{}";
