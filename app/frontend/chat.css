@@ -304,6 +304,46 @@ button {
   color: var(--muted);
 }
 
+.pantry-actions {
+  margin-top: 8px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.pantry-edit-btn {
+  padding: 6px 10px;
+}
+
+.pantry-edit-form {
+  margin-top: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.pantry-edit-form label {
+  display: grid;
+  gap: 4px;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.pantry-edit-form input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px;
+  font-size: 0.9rem;
+}
+
+.pantry-edit-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.pantry-edit-actions button {
+  padding: 7px 10px;
+}
+
 .tag {
   display: inline-block;
   margin-top: 6px;
