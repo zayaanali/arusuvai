@@ -36,6 +36,27 @@ If you want a different port:
 PORT=8000 npm run dev
 ```
 
+## AI mode setup
+
+1. Create env file from the template:
+
+```bash
+cp .env.example .env
+```
+
+2. Edit `.env` and set:
+
+- `OPENROUTER_API_KEY=...`
+- `OPENROUTER_MODEL=openai/gpt-4.1-mini` (or your preferred OpenRouter model slug)
+- Optional fallback: `OPENROUTER_FALLBACK_MODEL=openai/gpt-4.1-nano`
+- Optional: `OPENROUTER_SITE_URL` and `OPENROUTER_APP_NAME`
+
+3. Restart server:
+
+```bash
+npm run dev
+```
+
 ## API overview
 
 - `GET /health`

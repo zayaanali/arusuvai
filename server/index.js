@@ -1,4 +1,7 @@
+require("dotenv").config();
+
 const express = require("express");
+const OpenAI = require("openai");
 const path = require("path");
 const {
   run,
@@ -12,6 +15,18 @@ const {
 const app = express();
 const port = Number(process.env.PORT || 8000);
 const host = process.env.HOST || "0.0.0.0";
+const model = process.env.OPENROUTER_MODEL || "openai/gpt-4.1-mini";
+const fallbackModel = process.env.OPENROUTER_FALLBACK_MODEL || "";
+const openai = process.env.OPENROUTER_API_KEY
+  ? new OpenAI({
+      apiKey: process.env.OPENROUTER_API_KEY,
+      baseURL: "https://openrouter.ai/api/v1",
+      defaultHeaders: {
+        ...(process.env.OPENROUTER_SITE_URL ? { "HTTP-Referer": process.env.OPENROUTER_SITE_URL } : {}),
+        ...(process.env.OPENROUTER_APP_NAME ? { "X-Title": process.env.OPENROUTER_APP_NAME } : {}),
+      },
+    })
+  : null;
 
 app.use(express.json());
 app.use(express.static(path.join(process.cwd(), "public")));
@@ -33,6 +48,89 @@ function badRequest(res, message) {
   return res.status(400).json({ error: message });
 }
 
+async function requestAiPlan(message, selectedModel) {
+  return openai.chat.completions.create({
+    model: selectedModel,
+    response_format: { type: "json_object" },
+    messages: [
+      {
+        role: "system",
+        content: [
+          "You are Pantry Manager AI orchestrator.",
+          "Interpret user text and return JSON only.",
+          "Schema:",
+          "{",
+          '  "intent": "add_pantry|remove_pantry|list_pantry|clear_pantry|reply",',
+          '  "items": [{"name":"string","quantity":number|null,"unit":"string|null","category":"string|null","expires_at":"YYYY-MM-DD|null"}],',
+          '  "names": ["string"],',
+          '  "reply": "string"',
+          "}",
+          "Rules:",
+          "- If user asks to add pantry items, use intent=add_pantry with items.",
+          "- If user asks to remove/delete pantry items, use intent=remove_pantry with names.",
+          "- If user asks to list/show pantry, use intent=list_pantry.",
+          "- If user asks to clear all pantry, use intent=clear_pantry.",
+          "- Otherwise use intent=reply with concise helpful text.",
+        ].join("\n"),
+      },
+      {
+        role: "user",
+        content: message,
+      },
+    ],
+  });
+}
+
+function parseCsvList(raw) {
+  return String(raw || "")
+    .split(",")
+    .map((x) => normalizeName(x))
+    .filter(Boolean);
+}
+
+async function upsertPantryItem({ name, quantity = 1, unit = null, category = null, expiresAt = null }) {
+  const normalizedName = normalizeName(name);
+  if (!normalizedName) return null;
+
+  const qty = Number(quantity);
+  const safeQuantity = Number.isNaN(qty) ? 1 : qty;
+  const now = new Date().toISOString();
+  const safeUnit = normalizeName(unit || "") || "unit";
+  const safeCategory = normalizeName(category || "") || "uncategorized";
+
+  const existing = await get("SELECT * FROM pantry_items WHERE name = ?", [normalizedName]);
+  if (existing) {
+    await run(
+      `UPDATE pantry_items
+       SET quantity = quantity + ?,
+           unit = ?,
+           category = ?,
+           expires_at = ?,
+           updated_at = ?
+       WHERE id = ?`,
+      [safeQuantity, safeUnit, safeCategory, expiresAt || null, now, existing.id]
+    );
+    return get("SELECT * FROM pantry_items WHERE id = ?", [existing.id]);
+  }
+
+  const insert = await run(
+    `INSERT INTO pantry_items (name, quantity, unit, category, expires_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [normalizedName, safeQuantity, safeUnit, safeCategory, expiresAt || null, now, now]
+  );
+  return get("SELECT * FROM pantry_items WHERE id = ?", [insert.id]);
+}
+
+async function removePantryByNames(names) {
+  const normalized = Array.from(new Set((names || []).map((n) => normalizeName(n)).filter(Boolean)));
+  let removed = 0;
+  for (const name of normalized) {
+    const result = await run("DELETE FROM pantry_items WHERE name = ?", [name]);
+    removed += Number(result?.changes || 0);
+  }
+  return removed;
+}
+
 app.get("/health", (_req, res) => {
   res.json({
     status: "ok",
@@ -49,15 +147,114 @@ app.get("/api/health", (_req, res) => {
   });
 });
 
-app.post("/api/ai/chat", async (req, res) => {
-  const message = String(req.body?.message || "").trim();
-  if (!message) return badRequest(res, "message is required");
+app.post("/api/ai/chat", async (req, res, next) => {
+  try {
+    const message = String(req.body?.message || "").trim();
+    if (!message) return badRequest(res, "message is required");
+    if (!openai) return res.status(500).json({ error: "OPENROUTER_API_KEY is not set" });
 
-  res.json({
-    reply:
-      "AI backend is not connected yet. This endpoint is ready for model integration without changing pantry APIs.",
-    refresh_pantry: false,
-  });
+    let response;
+    try {
+      response = await requestAiPlan(message, model);
+    } catch (primaryErr) {
+      const isProviderUnavailable =
+        primaryErr?.status === 502 ||
+        primaryErr?.status === 503 ||
+        primaryErr?.status === 504 ||
+        /provider returned error/i.test(String(primaryErr?.message || ""));
+      const canFallback = Boolean(fallbackModel && fallbackModel !== model);
+      if (!(isProviderUnavailable && canFallback)) {
+        throw primaryErr;
+      }
+      response = await requestAiPlan(message, fallbackModel);
+    }
+
+    const raw = response.choices?.[0]?.message?.content || "{}";
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      parsed = { intent: "reply", reply: "I could not parse that request. Please rephrase." };
+    }
+
+    const intent = String(parsed?.intent || "reply");
+    if (intent === "add_pantry") {
+      const items = Array.isArray(parsed?.items) ? parsed.items : [];
+      if (!items.length) {
+        return res.json({ reply: "I did not find items to add. Try: add eggs, milk.", refresh_pantry: false });
+      }
+      const added = [];
+      for (const item of items) {
+        const created = await upsertPantryItem({
+          name: item?.name,
+          quantity: item?.quantity == null ? 1 : item.quantity,
+          unit: item?.unit || null,
+          category: item?.category || null,
+          expiresAt: item?.expires_at || null,
+        });
+        if (created?.name) added.push(created.name);
+      }
+      return res.json({
+        reply: added.length ? `Added to pantry: ${added.join(", ")}.` : "No valid items were added.",
+        refresh_pantry: true,
+      });
+    }
+
+    if (intent === "remove_pantry") {
+      let names = Array.isArray(parsed?.names) ? parsed.names : [];
+      if (!names.length && typeof message === "string") {
+        const maybe = message.replace(/^rm\b|^remove\b|^delete\b/i, "").trim();
+        names = parseCsvList(maybe);
+      }
+      const removed = await removePantryByNames(names);
+      return res.json({
+        reply: removed ? `Removed ${removed} pantry item(s).` : "No matching pantry items found to remove.",
+        refresh_pantry: true,
+      });
+    }
+
+    if (intent === "list_pantry") {
+      const rows = await all("SELECT * FROM pantry_items ORDER BY name");
+      const names = rows.map((r) => r.name);
+      return res.json({
+        reply: names.length ? `Pantry items: ${names.join(", ")}.` : "Pantry is empty.",
+        refresh_pantry: true,
+      });
+    }
+
+    if (intent === "clear_pantry") {
+      const result = await run("DELETE FROM pantry_items");
+      return res.json({
+        reply: `Pantry cleared. Deleted ${Number(result?.changes || 0)} item(s).`,
+        refresh_pantry: true,
+      });
+    }
+
+    return res.json({
+      reply: String(parsed?.reply || "Done."),
+      refresh_pantry: false,
+    });
+  } catch (err) {
+    if (err && (err.code === "insufficient_quota" || err.status === 429)) {
+      return res.status(429).json({
+        error:
+          "OpenRouter quota/rate limit exceeded. Check OpenRouter credits, limits, and model availability.",
+      });
+    }
+    if (err && err.status === 401) {
+      return res.status(401).json({ error: "OpenRouter authentication failed. Check OPENROUTER_API_KEY." });
+    }
+    if (err && err.status === 403) {
+      return res.status(403).json({ error: "OpenRouter access denied for this model or account." });
+    }
+    if (err && (err.status === 502 || err.status === 503 || err.status === 504)) {
+      return res.status(503).json({
+        error:
+          "AI provider is temporarily unavailable. Retry in a few seconds, or set OPENROUTER_FALLBACK_MODEL in .env.",
+      });
+    }
+    return next(err);
+  }
 });
 
 app.get("/api/pantry", async (req, res, next) => {
@@ -326,7 +523,7 @@ app.get("*", (_req, res) => {
 });
 
 app.use((err, _req, res, _next) => {
-  console.error(err);
+  console.error("Unhandled server error:", err?.message || err);
   res.status(500).json({ error: "Internal server error" });
 });
 
