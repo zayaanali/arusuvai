@@ -2,6 +2,7 @@ require("dotenv").config();
 
 const express = require("express");
 const OpenAI = require("openai");
+const crypto = require("crypto");
 const path = require("path");
 const {
   run,
@@ -27,6 +28,13 @@ const openai = process.env.OPENROUTER_API_KEY
       },
     })
   : null;
+
+const ADMIN_USERNAMES = new Set(
+  String(process.env.ADMIN_USERNAMES || "")
+    .split(",")
+    .map((value) => normalizeName(value))
+    .filter(Boolean)
+);
 
 app.use(express.json());
 app.use(express.static(path.join(process.cwd(), "public")));
@@ -64,6 +72,96 @@ function sanitizeChatHistory(rawHistory) {
     cleaned.push({ role, content });
   }
   return cleaned;
+}
+
+function hashPassword(password) {
+  const salt = crypto.randomBytes(16).toString("hex");
+  const derived = crypto.scryptSync(password, salt, 64).toString("hex");
+  return `${salt}:${derived}`;
+}
+
+function verifyPassword(password, storedHash) {
+  const [salt, digest] = String(storedHash || "").split(":");
+  if (!salt || !digest) return false;
+  const derived = crypto.scryptSync(password, salt, 64).toString("hex");
+  const left = Buffer.from(digest, "hex");
+  const right = Buffer.from(derived, "hex");
+  if (left.length !== right.length) return false;
+  return crypto.timingSafeEqual(left, right);
+}
+
+function hashToken(token) {
+  return crypto.createHash("sha256").update(String(token || "")).digest("hex");
+}
+
+function parseBearerToken(req) {
+  const header = String(req.headers.authorization || "").trim();
+  const match = header.match(/^Bearer\s+(.+)$/i);
+  return match ? match[1].trim() : "";
+}
+
+function toAuthUser(row) {
+  return {
+    id: row.id,
+    username: row.username,
+    is_admin: Boolean(row.is_admin),
+  };
+}
+
+async function createSession(userId) {
+  const token = crypto.randomBytes(32).toString("hex");
+  const tokenHash = hashToken(token);
+  const now = new Date().toISOString();
+  await run(
+    `INSERT INTO sessions (user_id, token_hash, created_at, last_used_at)
+     VALUES (?, ?, ?, ?)`,
+    [userId, tokenHash, now, now]
+  );
+  return token;
+}
+
+async function resolveSession(token) {
+  const tokenHash = hashToken(token);
+  const row = await get(
+    `SELECT s.id AS session_id, s.user_id, u.username, u.is_admin
+     FROM sessions s
+     JOIN users u ON u.id = s.user_id
+     WHERE s.token_hash = ?`,
+    [tokenHash]
+  );
+  if (!row) return null;
+
+  await run(`UPDATE sessions SET last_used_at = ? WHERE id = ?`, [new Date().toISOString(), row.session_id]);
+  return {
+    sessionId: row.session_id,
+    tokenHash,
+    user: {
+      id: row.user_id,
+      username: row.username,
+      is_admin: Boolean(row.is_admin),
+    },
+  };
+}
+
+async function requireAuth(req, res, next) {
+  try {
+    const token = parseBearerToken(req);
+    if (!token) return res.status(401).json({ error: "Authentication required" });
+
+    const session = await resolveSession(token);
+    if (!session) return res.status(401).json({ error: "Invalid or expired session" });
+
+    req.user = session.user;
+    req.sessionId = session.sessionId;
+    req.tokenHash = session.tokenHash;
+    return next();
+  } catch (err) {
+    return next(err);
+  }
+}
+
+function shouldGrantAdmin({ username }) {
+  return ADMIN_USERNAMES.has(username);
 }
 
 async function requestAiPlan({ message, selectedModel, history, pantrySnapshot }) {
@@ -119,17 +217,62 @@ function parseCsvList(raw) {
     .filter(Boolean);
 }
 
-async function upsertPantryItem({ name, quantity = 1, unit = null, category = null, expiresAt = null }) {
+async function upsertGlobalItemDefinition({ name, unit = null, category = null, allowOverride = false }) {
+  const normalizedName = normalizeName(name);
+  if (!normalizedName) return null;
+
+  const existing = await get("SELECT * FROM global_items WHERE name = ?", [normalizedName]);
+  const unitValue = normalizeName(unit || "") || null;
+  const categoryValue = normalizeName(category || "") || null;
+
+  if (!existing) {
+    const now = new Date().toISOString();
+    const insertUnit = allowOverride && unitValue ? unitValue : "unit";
+    const insertCategory = allowOverride && categoryValue ? categoryValue : "uncategorized";
+    const inserted = await run(
+      `INSERT INTO global_items (name, default_unit, default_category, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?)`,
+      [normalizedName, insertUnit, insertCategory, now, now]
+    );
+    return get("SELECT * FROM global_items WHERE id = ?", [inserted.id]);
+  }
+
+  if (allowOverride) {
+    const nextUnit = unitValue || existing.default_unit || "unit";
+    const nextCategory = categoryValue || existing.default_category || "uncategorized";
+    if (nextUnit !== existing.default_unit || nextCategory !== existing.default_category) {
+      await run(
+        `UPDATE global_items
+         SET default_unit = ?, default_category = ?, updated_at = ?
+         WHERE id = ?`,
+        [nextUnit, nextCategory, new Date().toISOString(), existing.id]
+      );
+      return get("SELECT * FROM global_items WHERE id = ?", [existing.id]);
+    }
+  }
+
+  return existing;
+}
+
+async function upsertPantryItem({ userId, actorIsAdmin, name, quantity = 1, unit = null, category = null, expiresAt = null }) {
   const normalizedName = normalizeName(name);
   if (!normalizedName) return null;
 
   const qty = Number(quantity);
   const safeQuantity = Number.isNaN(qty) ? 1 : qty;
-  const now = new Date().toISOString();
-  const safeUnit = normalizeName(unit || "") || "unit";
-  const safeCategory = normalizeName(category || "") || "uncategorized";
 
-  const existing = await get("SELECT * FROM pantry_items WHERE name = ?", [normalizedName]);
+  const catalog = await upsertGlobalItemDefinition({
+    name: normalizedName,
+    unit,
+    category,
+    allowOverride: Boolean(actorIsAdmin),
+  });
+
+  const safeUnit = normalizeName(unit || "") || catalog?.default_unit || "unit";
+  const safeCategory = normalizeName(category || "") || catalog?.default_category || "uncategorized";
+  const now = new Date().toISOString();
+
+  const existing = await get("SELECT * FROM pantry_items WHERE user_id = ? AND name = ?", [userId, normalizedName]);
   if (existing) {
     await run(
       `UPDATE pantry_items
@@ -141,22 +284,24 @@ async function upsertPantryItem({ name, quantity = 1, unit = null, category = nu
        WHERE id = ?`,
       [safeQuantity, safeUnit, safeCategory, expiresAt || null, now, existing.id]
     );
-    return get("SELECT * FROM pantry_items WHERE id = ?", [existing.id]);
+    const row = await get("SELECT * FROM pantry_items WHERE id = ?", [existing.id]);
+    return { row, created: false };
   }
 
   const insert = await run(
-    `INSERT INTO pantry_items (name, quantity, unit, category, expires_at, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [normalizedName, safeQuantity, safeUnit, safeCategory, expiresAt || null, now, now]
+    `INSERT INTO pantry_items (user_id, name, quantity, unit, category, expires_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [userId, normalizedName, safeQuantity, safeUnit, safeCategory, expiresAt || null, now, now]
   );
-  return get("SELECT * FROM pantry_items WHERE id = ?", [insert.id]);
+  const row = await get("SELECT * FROM pantry_items WHERE id = ?", [insert.id]);
+  return { row, created: true };
 }
 
-async function removePantryByNames(names) {
+async function removePantryByNames(userId, names) {
   const normalized = Array.from(new Set((names || []).map((n) => normalizeName(n)).filter(Boolean)));
   let removed = 0;
   for (const name of normalized) {
-    const result = await run("DELETE FROM pantry_items WHERE name = ?", [name]);
+    const result = await run("DELETE FROM pantry_items WHERE user_id = ? AND name = ?", [userId, name]);
     removed += Number(result?.changes || 0);
   }
   return removed;
@@ -178,14 +323,76 @@ app.get("/api/health", (_req, res) => {
   });
 });
 
-app.post("/api/ai/chat", async (req, res, next) => {
+app.post("/api/auth/register", async (req, res, next) => {
+  try {
+    const username = normalizeName(req.body?.username);
+    const password = String(req.body?.password || "");
+
+    if (!username) return badRequest(res, "username is required");
+    if (username.length < 3) return badRequest(res, "username must be at least 3 characters");
+
+    const existing = await get("SELECT id FROM users WHERE username = ?", [username]);
+    if (existing) return res.status(409).json({ error: "username already exists" });
+
+    const isAdmin = shouldGrantAdmin({ username }) ? 1 : 0;
+    const now = new Date().toISOString();
+
+    const created = await run(
+      `INSERT INTO users (username, password_hash, is_admin, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?)`,
+      [username, hashPassword(password), isAdmin, now, now]
+    );
+
+    const user = await get("SELECT id, username, is_admin FROM users WHERE id = ?", [created.id]);
+    const token = await createSession(user.id);
+    return res.status(201).json({ token, user: toAuthUser(user) });
+  } catch (err) {
+    return next(err);
+  }
+});
+
+app.post("/api/auth/login", async (req, res, next) => {
+  try {
+    const username = normalizeName(req.body?.username);
+    const password = String(req.body?.password || "");
+
+    if (!username || !password) return badRequest(res, "username and password are required");
+
+    const user = await get("SELECT * FROM users WHERE username = ?", [username]);
+    if (!user || !verifyPassword(password, user.password_hash)) {
+      return res.status(401).json({ error: "invalid username or password" });
+    }
+
+    const token = await createSession(user.id);
+    return res.json({ token, user: toAuthUser(user) });
+  } catch (err) {
+    return next(err);
+  }
+});
+
+app.get("/api/auth/me", requireAuth, async (req, res) => {
+  res.json({ user: req.user });
+});
+
+app.post("/api/auth/logout", requireAuth, async (req, res, next) => {
+  try {
+    await run("DELETE FROM sessions WHERE id = ?", [req.sessionId]);
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post("/api/ai/chat", requireAuth, async (req, res, next) => {
   try {
     const message = String(req.body?.message || "").trim();
     if (!message) return badRequest(res, "message is required");
     if (!openai) return res.status(500).json({ error: "OPENROUTER_API_KEY is not set" });
+
     const history = sanitizeChatHistory(req.body?.history);
     const pantrySnapshot = await all(
-      "SELECT name, quantity, unit, category, expires_at FROM pantry_items ORDER BY updated_at ASC, id ASC"
+      "SELECT name, quantity, unit, category, expires_at FROM pantry_items WHERE user_id = ? ORDER BY updated_at ASC, id ASC",
+      [req.user.id]
     );
 
     let response;
@@ -218,17 +425,21 @@ app.post("/api/ai/chat", async (req, res, next) => {
       if (!items.length) {
         return res.json({ reply: "I did not find items to add. Try: add eggs, milk.", refresh_pantry: false });
       }
+
       const added = [];
       for (const item of items) {
-        const created = await upsertPantryItem({
+        const result = await upsertPantryItem({
+          userId: req.user.id,
+          actorIsAdmin: req.user.is_admin,
           name: item?.name,
           quantity: item?.quantity == null ? 1 : item.quantity,
           unit: item?.unit || null,
           category: item?.category || null,
           expiresAt: item?.expires_at || null,
         });
-        if (created?.name) added.push(created.name);
+        if (result?.row?.name) added.push(result.row.name);
       }
+
       return res.json({
         reply: added.length ? `Added to pantry: ${added.join(", ")}.` : "No valid items were added.",
         refresh_pantry: true,
@@ -241,7 +452,8 @@ app.post("/api/ai/chat", async (req, res, next) => {
         const maybe = message.replace(/^rm\b|^remove\b|^delete\b/i, "").trim();
         names = parseCsvList(maybe);
       }
-      const removed = await removePantryByNames(names);
+
+      const removed = await removePantryByNames(req.user.id, names);
       return res.json({
         reply: removed ? `Removed ${removed} pantry item(s).` : "No matching pantry items found to remove.",
         refresh_pantry: true,
@@ -249,7 +461,7 @@ app.post("/api/ai/chat", async (req, res, next) => {
     }
 
     if (intent === "list_pantry") {
-      const rows = await all("SELECT * FROM pantry_items ORDER BY name");
+      const rows = await all("SELECT * FROM pantry_items WHERE user_id = ? ORDER BY name", [req.user.id]);
       const names = rows.map((r) => r.name);
       return res.json({
         reply: names.length ? `Pantry items: ${names.join(", ")}.` : "Pantry is empty.",
@@ -258,7 +470,7 @@ app.post("/api/ai/chat", async (req, res, next) => {
     }
 
     if (intent === "clear_pantry") {
-      const result = await run("DELETE FROM pantry_items");
+      const result = await run("DELETE FROM pantry_items WHERE user_id = ?", [req.user.id]);
       return res.json({
         reply: `Pantry cleared. Deleted ${Number(result?.changes || 0)} item(s).`,
         refresh_pantry: true,
@@ -292,30 +504,27 @@ app.post("/api/ai/chat", async (req, res, next) => {
   }
 });
 
-app.get("/api/pantry", async (req, res, next) => {
+app.get("/api/pantry", requireAuth, async (req, res, next) => {
   try {
     const category = req.query.category ? normalizeName(req.query.category) : null;
     const expiringWithin = req.query.expiring_within_days;
 
-    let sql = "SELECT * FROM pantry_items";
-    const where = [];
-    const params = [];
+    let sql = "SELECT * FROM pantry_items WHERE user_id = ?";
+    const params = [req.user.id];
 
     if (category) {
-      where.push("category = ?");
+      sql += " AND category = ?";
       params.push(category);
     }
 
     if (expiringWithin !== undefined) {
       const days = Number(expiringWithin);
       if (Number.isNaN(days) || days < 0) return badRequest(res, "expiring_within_days must be >= 0");
-      where.push("expires_at IS NOT NULL AND expires_at <= ?");
+      sql += " AND expires_at IS NOT NULL AND expires_at <= ?";
       params.push(todayPlusDays(days));
     }
 
-    if (where.length) sql += ` WHERE ${where.join(" AND ")}`;
     sql += " ORDER BY name";
-
     const rows = await all(sql, params);
     res.json(rows.map(toPantryRead));
   } catch (err) {
@@ -323,14 +532,16 @@ app.get("/api/pantry", async (req, res, next) => {
   }
 });
 
-app.get("/api/pantry/expiring", async (req, res, next) => {
+app.get("/api/pantry/expiring", requireAuth, async (req, res, next) => {
   try {
     const days = Number(req.query.days || 7);
     if (Number.isNaN(days) || days < 0) return badRequest(res, "days must be >= 0");
 
     const rows = await all(
-      `SELECT * FROM pantry_items WHERE expires_at IS NOT NULL AND expires_at <= ? ORDER BY expires_at ASC`,
-      [todayPlusDays(days)]
+      `SELECT * FROM pantry_items
+       WHERE user_id = ? AND expires_at IS NOT NULL AND expires_at <= ?
+       ORDER BY expires_at ASC`,
+      [req.user.id, todayPlusDays(days)]
     );
     res.json(rows.map(toPantryRead));
   } catch (err) {
@@ -338,7 +549,7 @@ app.get("/api/pantry/expiring", async (req, res, next) => {
   }
 });
 
-app.post("/api/pantry", async (req, res, next) => {
+app.post("/api/pantry", requireAuth, async (req, res, next) => {
   try {
     const name = normalizeName(req.body?.name);
     if (!name) return badRequest(res, "name is required");
@@ -346,43 +557,27 @@ app.post("/api/pantry", async (req, res, next) => {
     const quantity = req.body?.quantity == null ? 1 : Number(req.body.quantity);
     if (Number.isNaN(quantity)) return badRequest(res, "quantity must be a number");
 
-    const now = new Date().toISOString();
-    const unit = normalizeName(req.body?.unit || "") || "unit";
-    const category = normalizeName(req.body?.category || "") || "uncategorized";
-    const expiresAt = req.body?.expires_at || null;
+    const result = await upsertPantryItem({
+      userId: req.user.id,
+      actorIsAdmin: req.user.is_admin,
+      name,
+      quantity,
+      unit: req.body?.unit || null,
+      category: req.body?.category || null,
+      expiresAt: req.body?.expires_at || null,
+    });
 
-    const existing = await get("SELECT * FROM pantry_items WHERE name = ?", [name]);
-    if (existing) {
-      await run(
-        `UPDATE pantry_items
-         SET quantity = quantity + ?,
-             unit = ?,
-             category = ?,
-             expires_at = ?,
-             updated_at = ?
-         WHERE id = ?`,
-        [quantity, unit, category, expiresAt, now, existing.id]
-      );
-      const updated = await get("SELECT * FROM pantry_items WHERE id = ?", [existing.id]);
-      return res.json(toPantryRead(updated));
-    }
-
-    const insert = await run(
-      `INSERT INTO pantry_items (name, quantity, unit, category, expires_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [name, quantity, unit, category, expiresAt, now, now]
-    );
-    const created = await get("SELECT * FROM pantry_items WHERE id = ?", [insert.id]);
-    res.status(201).json(toPantryRead(created));
+    if (!result?.row) return badRequest(res, "name is required");
+    return res.status(result.created ? 201 : 200).json(toPantryRead(result.row));
   } catch (err) {
     next(err);
   }
 });
 
-app.patch("/api/pantry/:id", async (req, res, next) => {
+app.patch("/api/pantry/:id", requireAuth, async (req, res, next) => {
   try {
     const id = Number(req.params.id);
-    const existing = await get("SELECT * FROM pantry_items WHERE id = ?", [id]);
+    const existing = await get("SELECT * FROM pantry_items WHERE id = ? AND user_id = ?", [id, req.user.id]);
     if (!existing) return res.status(404).json({ error: "Pantry item not found" });
 
     const name = req.body?.name ? normalizeName(req.body.name) : existing.name;
@@ -395,14 +590,34 @@ app.patch("/api/pantry/:id", async (req, res, next) => {
     if (!name) return badRequest(res, "name cannot be empty");
     if (Number.isNaN(quantity)) return badRequest(res, "quantity must be a number");
 
-    const duplicate = await get("SELECT id FROM pantry_items WHERE name = ? AND id != ?", [name, id]);
+    const duplicate = await get("SELECT id FROM pantry_items WHERE user_id = ? AND name = ? AND id != ?", [
+      req.user.id,
+      name,
+      id,
+    ]);
     if (duplicate) return res.status(409).json({ error: "Pantry item with this name already exists" });
+
+    if (req.user.is_admin && (req.body?.unit !== undefined || req.body?.category !== undefined)) {
+      await upsertGlobalItemDefinition({
+        name,
+        unit,
+        category,
+        allowOverride: true,
+      });
+    } else {
+      await upsertGlobalItemDefinition({
+        name,
+        unit: null,
+        category: null,
+        allowOverride: false,
+      });
+    }
 
     await run(
       `UPDATE pantry_items
        SET name = ?, quantity = ?, unit = ?, category = ?, expires_at = ?, updated_at = ?
-       WHERE id = ?`,
-      [name, quantity, unit, category, expiresAt, new Date().toISOString(), id]
+       WHERE id = ? AND user_id = ?`,
+      [name, quantity, unit, category, expiresAt, new Date().toISOString(), id, req.user.id]
     );
 
     const updated = await get("SELECT * FROM pantry_items WHERE id = ?", [id]);
@@ -412,10 +627,10 @@ app.patch("/api/pantry/:id", async (req, res, next) => {
   }
 });
 
-app.delete("/api/pantry/:id", async (req, res, next) => {
+app.delete("/api/pantry/:id", requireAuth, async (req, res, next) => {
   try {
     const id = Number(req.params.id);
-    const result = await run("DELETE FROM pantry_items WHERE id = ?", [id]);
+    const result = await run("DELETE FROM pantry_items WHERE id = ? AND user_id = ?", [id, req.user.id]);
     if (!result.changes) return res.status(404).json({ error: "Pantry item not found" });
     res.json({ deleted: id });
   } catch (err) {
@@ -423,9 +638,9 @@ app.delete("/api/pantry/:id", async (req, res, next) => {
   }
 });
 
-app.delete("/api/pantry", async (_req, res, next) => {
+app.delete("/api/pantry", requireAuth, async (_req, res, next) => {
   try {
-    const result = await run("DELETE FROM pantry_items");
+    const result = await run("DELETE FROM pantry_items WHERE user_id = ?", [_req.user.id]);
     res.json({ deleted: result.changes });
   } catch (err) {
     next(err);

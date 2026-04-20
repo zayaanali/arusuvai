@@ -45,15 +45,92 @@ function todayPlusDays(days) {
   return now.toISOString().slice(0, 10);
 }
 
-async function initDb() {
+async function tableExists(name) {
+  const row = await get("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?", [name]);
+  return Boolean(row);
+}
+
+async function ensureUsersTable() {
+  await run(`
+    CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      username TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      is_admin INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `);
+
+  const columns = await all("PRAGMA table_info(users)");
+  const hasAdminColumn = columns.some((col) => col.name === "is_admin");
+  if (!hasAdminColumn) {
+    await run("ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0");
+  }
+}
+
+async function createPantryTable() {
   await run(`
     CREATE TABLE IF NOT EXISTS pantry_items (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL UNIQUE,
+      user_id INTEGER,
+      name TEXT NOT NULL,
       quantity REAL NOT NULL DEFAULT 1,
       unit TEXT NOT NULL DEFAULT 'unit',
       category TEXT NOT NULL DEFAULT 'uncategorized',
       expires_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(user_id, name),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    )
+  `);
+}
+
+async function ensurePantryTable() {
+  const exists = await tableExists("pantry_items");
+  if (!exists) {
+    await createPantryTable();
+    return;
+  }
+
+  const columns = await all("PRAGMA table_info(pantry_items)");
+  const hasUserId = columns.some((col) => col.name === "user_id");
+  if (hasUserId) return;
+
+  await run("ALTER TABLE pantry_items RENAME TO pantry_items_legacy");
+  await createPantryTable();
+  await run(`
+    INSERT INTO pantry_items (id, user_id, name, quantity, unit, category, expires_at, created_at, updated_at)
+    SELECT id, NULL, name, quantity, unit, category, expires_at, created_at, updated_at
+    FROM pantry_items_legacy
+  `);
+  await run("DROP TABLE pantry_items_legacy");
+}
+
+async function initDb() {
+  await run("PRAGMA foreign_keys = ON");
+
+  await ensureUsersTable();
+  await ensurePantryTable();
+
+  await run(`
+    CREATE TABLE IF NOT EXISTS sessions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      token_hash TEXT NOT NULL UNIQUE,
+      created_at TEXT NOT NULL,
+      last_used_at TEXT NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    )
+  `);
+
+  await run(`
+    CREATE TABLE IF NOT EXISTS global_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE,
+      default_unit TEXT NOT NULL DEFAULT 'unit',
+      default_category TEXT NOT NULL DEFAULT 'uncategorized',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     )

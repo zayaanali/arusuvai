@@ -13,10 +13,27 @@ const aboutBtn = document.getElementById("about-btn");
 const aboutModal = document.getElementById("about-modal");
 const aboutBackdrop = document.getElementById("about-backdrop");
 const aboutCloseBtn = document.getElementById("about-close");
+const loginBtn = document.getElementById("login-btn");
+const registerBtn = document.getElementById("register-btn");
+const loginModal = document.getElementById("login-modal");
+const loginBackdrop = document.getElementById("login-backdrop");
+const loginCloseBtn = document.getElementById("login-close");
+const registerModal = document.getElementById("register-modal");
+const registerBackdrop = document.getElementById("register-backdrop");
+const registerCloseBtn = document.getElementById("register-close");
+const authStateEl = document.getElementById("auth-state");
+const loginForm = document.getElementById("login-form");
+const registerForm = document.getElementById("register-form");
+const loginFeedbackEl = document.getElementById("login-feedback");
+const registerFeedbackEl = document.getElementById("register-feedback");
+const logoutBtn = document.getElementById("logout-btn");
 const API_BASE_URL = "/api";
+const AUTH_TOKEN_KEY = "pantry_auth_token";
 const userMessageHistory = [];
 let lastPantryItems = [];
 let editingPantryItemId = null;
+let authToken = "";
+let authUser = null;
 const MANUAL_HELP =
   "Type `help` any time to see all commands.";
 const HELP_TEXT = `Manual Commands
@@ -179,8 +196,16 @@ async function fetchApi(path, options) {
 }
 
 async function api(path, options = {}) {
+  const headers = {
+    "Content-Type": "application/json",
+    ...(options.headers || {}),
+  };
+  if (authToken) {
+    headers.Authorization = `Bearer ${authToken}`;
+  }
+
   const res = await fetchApi(path, {
-    headers: { "Content-Type": "application/json" },
+    headers,
     ...options,
   });
   const text = await res.text();
@@ -191,9 +216,55 @@ async function api(path, options = {}) {
     throw new Error(`Non-JSON API response for ${path}. Check API base URL.`);
   }
   if (!res.ok) {
-    throw new Error(typeof data === "string" ? data : JSON.stringify(data));
+    if (res.status === 401 && !path.startsWith("/auth/")) {
+      clearAuth();
+      throw new Error("Please login first.");
+    }
+    throw new Error(data?.error || (typeof data === "string" ? data : JSON.stringify(data)));
   }
   return data;
+}
+
+function setAuth(token, user) {
+  authToken = String(token || "");
+  authUser = user || null;
+  if (authToken) {
+    localStorage.setItem(AUTH_TOKEN_KEY, authToken);
+  } else {
+    localStorage.removeItem(AUTH_TOKEN_KEY);
+  }
+  renderAuthState();
+}
+
+function clearAuth() {
+  authToken = "";
+  authUser = null;
+  localStorage.removeItem(AUTH_TOKEN_KEY);
+  renderAuthState();
+}
+
+function renderAuthState() {
+  if (!authStateEl) return;
+  if (!authUser) {
+    authStateEl.textContent = "Not signed in";
+    return;
+  }
+  authStateEl.textContent = `Signed in as ${authUser.username}${authUser.is_admin ? " (admin)" : ""}`;
+}
+
+function ensureSignedIn() {
+  if (!authToken || !authUser) {
+    throw new Error("Please login first.");
+  }
+}
+
+function setAuthFeedback(target, message, type = "neutral") {
+  if (!target) return;
+  target.textContent = String(message || "");
+  target.classList.remove("error", "success");
+  if (type === "error" || type === "success") {
+    target.classList.add(type);
+  }
 }
 
 function normalizeName(input) {
@@ -382,6 +453,7 @@ function renderPantry(items) {
 }
 
 async function refreshPantry() {
+  ensureSignedIn();
   const items = await api("/pantry");
   lastPantryItems = items;
   if (editingPantryItemId && !items.some((item) => item.id === editingPantryItemId)) {
@@ -765,6 +837,7 @@ async function runAiMode(message) {
 }
 
 async function handleChat(message) {
+  ensureSignedIn();
   addMessage("user", message);
   userMessageHistory.push(message);
   if (useAiToggle.checked) {
@@ -806,6 +879,61 @@ document.getElementById("refresh-pantry").addEventListener("click", async () => 
   }
 });
 
+loginForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = new FormData(event.target);
+  setAuthFeedback(loginFeedbackEl, "");
+  try {
+    const data = await api("/auth/login", {
+      method: "POST",
+      body: JSON.stringify({
+        username: form.get("username"),
+        password: form.get("password"),
+      }),
+    });
+    setAuth(data.token, data.user);
+    event.target.reset();
+    await refreshPantry();
+    setAuthFeedback(loginFeedbackEl, `Welcome back, ${data.user.username}.`, "success");
+  } catch (err) {
+    setAuthFeedback(loginFeedbackEl, `Login failed: ${err.message}`, "error");
+  }
+});
+
+registerForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = new FormData(event.target);
+  setAuthFeedback(registerFeedbackEl, "");
+  try {
+    const data = await api("/auth/register", {
+      method: "POST",
+      body: JSON.stringify({
+        username: form.get("username"),
+        password: form.get("password"),
+      }),
+    });
+    setAuth(data.token, data.user);
+    event.target.reset();
+    await refreshPantry();
+    setAuthFeedback(registerFeedbackEl, `Account created for ${data.user.username}.`, "success");
+  } catch (err) {
+    setAuthFeedback(registerFeedbackEl, `Register failed: ${err.message}`, "error");
+  }
+});
+
+logoutBtn?.addEventListener("click", async () => {
+  try {
+    if (authToken) {
+      await api("/auth/logout", { method: "POST" });
+    }
+  } catch (_err) {
+    // Ignore and clear local state anyway.
+  }
+  clearAuth();
+  renderPantry([]);
+  addMessage("bot", "Signed out.");
+});
+
 function openHelpModal() {
   helpModal.classList.remove("hidden");
   helpModal.setAttribute("aria-hidden", "false");
@@ -826,18 +954,52 @@ function closeAboutModal() {
   aboutModal.setAttribute("aria-hidden", "true");
 }
 
+function openLoginModal() {
+  setAuthFeedback(loginFeedbackEl, "");
+  loginModal.classList.remove("hidden");
+  loginModal.setAttribute("aria-hidden", "false");
+}
+
+function closeLoginModal() {
+  loginModal.classList.add("hidden");
+  loginModal.setAttribute("aria-hidden", "true");
+}
+
+function openRegisterModal() {
+  setAuthFeedback(registerFeedbackEl, "");
+  registerModal.classList.remove("hidden");
+  registerModal.setAttribute("aria-hidden", "false");
+}
+
+function closeRegisterModal() {
+  registerModal.classList.add("hidden");
+  registerModal.setAttribute("aria-hidden", "true");
+}
+
 helpBtn.addEventListener("click", openHelpModal);
 helpCloseBtn.addEventListener("click", closeHelpModal);
 helpBackdrop.addEventListener("click", closeHelpModal);
 aboutBtn.addEventListener("click", openAboutModal);
 aboutCloseBtn.addEventListener("click", closeAboutModal);
 aboutBackdrop.addEventListener("click", closeAboutModal);
+loginBtn?.addEventListener("click", openLoginModal);
+loginCloseBtn?.addEventListener("click", closeLoginModal);
+loginBackdrop?.addEventListener("click", closeLoginModal);
+registerBtn?.addEventListener("click", openRegisterModal);
+registerCloseBtn?.addEventListener("click", closeRegisterModal);
+registerBackdrop?.addEventListener("click", closeRegisterModal);
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && !helpModal.classList.contains("hidden")) {
     closeHelpModal();
   }
   if (event.key === "Escape" && !aboutModal.classList.contains("hidden")) {
     closeAboutModal();
+  }
+  if (event.key === "Escape" && !loginModal.classList.contains("hidden")) {
+    closeLoginModal();
+  }
+  if (event.key === "Escape" && !registerModal.classList.contains("hidden")) {
+    closeRegisterModal();
   }
 });
 
@@ -853,10 +1015,26 @@ useAiToggle.addEventListener("change", () => {
   // Force a predictable startup mode; some browsers may restore prior toggle state.
   useAiToggle.checked = false;
   addMessage("bot", `Manual mode ready. ${MANUAL_HELP}`);
+  renderAuthState();
   try {
     await api("/health");
     statusEl.textContent = "API online";
-    await refreshPantry();
+    const storedToken = localStorage.getItem(AUTH_TOKEN_KEY);
+    if (storedToken) {
+      authToken = storedToken;
+      try {
+        const me = await api("/auth/me");
+        setAuth(storedToken, me.user);
+        await refreshPantry();
+      } catch (_err) {
+        clearAuth();
+        renderPantry([]);
+        addMessage("bot", "Session expired. Please login again.");
+      }
+    } else {
+      renderPantry([]);
+      addMessage("bot", "Login or register to access your pantry.");
+    }
   } catch (err) {
     statusEl.textContent = "API offline";
     addMessage("bot", `Cannot connect to API: ${err.message}`);
