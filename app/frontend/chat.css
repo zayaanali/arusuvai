@@ -104,6 +104,22 @@ body {
   max-width: 100%;
 }
 
+.auth-status-wrap {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 0 18px 10px;
+}
+
+.auth-state {
+  font-size: 0.82rem;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  background: #f3fbf6;
+  border-radius: 10px;
+  padding: 10px;
+  max-width: 320px;
+}
+
 .layout {
   max-width: 1100px;
   margin: 0 auto;
@@ -430,6 +446,40 @@ button {
   border-radius: 6px;
   overflow-wrap: anywhere;
   word-break: break-word;
+}
+
+.auth-modal-card {
+  width: min(420px, calc(100vw - 16px));
+}
+
+.auth-modal-form {
+  display: grid;
+  gap: 10px;
+}
+
+.auth-modal-form input {
+  width: 100%;
+}
+
+.auth-modal-form button {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+.auth-feedback {
+  margin: 10px 0 0;
+  min-height: 1.2em;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.auth-feedback.error {
+  color: #a22d2d;
+}
+
+.auth-feedback.success {
+  color: #1f6b3f;
 }
 
 @keyframes rise {

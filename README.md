@@ -60,6 +60,10 @@ npm run dev
 ## API overview
 
 - `GET /health`
+- `POST /api/auth/register`
+- `POST /api/auth/login`
+- `GET /api/auth/me` (Bearer token required)
+- `POST /api/auth/logout` (Bearer token required)
 - `GET /api/pantry`
 - `POST /api/pantry`
 - `PATCH /api/pantry/:id`
@@ -74,6 +78,15 @@ npm run dev
 - `POST /api/recipes`
 - `DELETE /api/recipes/:id`
 - `POST /api/ai/chat` (AI integration point)
+
+## Users, Pantry Isolation, and Global Items
+
+- Each account has `username` + password auth and its own pantry records.
+- Send `Authorization: Bearer <token>` for pantry and AI endpoints.
+- A global item catalog (`global_items`) is upserted before pantry item creation.
+- Pantry add auto-loads default `unit` and `category` from the global catalog when fields are omitted.
+- Admin users can set global defaults by updating item `unit`/`category`.
+  - Admin users are assigned via `ADMIN_USERNAMES` in `.env` (comma-separated).
 
 ## AI backend integration
 
