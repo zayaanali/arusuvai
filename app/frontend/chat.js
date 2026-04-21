@@ -29,6 +29,7 @@ const registerFeedbackEl = document.getElementById("register-feedback");
 const logoutBtn = document.getElementById("logout-btn");
 const API_BASE_URL = "/api";
 const AUTH_TOKEN_KEY = "pantry_auth_token";
+const DEFAULT_AI_MODE = false;
 const userMessageHistory = [];
 let lastPantryItems = [];
 let editingPantryItemId = null;
@@ -1013,8 +1014,12 @@ useAiToggle.addEventListener("change", () => {
 
 (async function init() {
   // Force a predictable startup mode; some browsers may restore prior toggle state.
-  useAiToggle.checked = false;
-  addMessage("bot", `Manual mode ready. ${MANUAL_HELP}`);
+  useAiToggle.checked = DEFAULT_AI_MODE;
+  if (DEFAULT_AI_MODE) {
+    addMessage("bot", "Use AI is ON. Messages now go to /api/ai/chat.");
+  } else {
+    addMessage("bot", `Manual mode ready. ${MANUAL_HELP}`);
+  }
   renderAuthState();
   try {
     await api("/health");
