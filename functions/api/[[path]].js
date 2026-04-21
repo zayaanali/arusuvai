@@ -15,7 +15,10 @@ function toBackendUrl(requestUrl, env) {
     : "";
 
   const incoming = new URL(requestUrl);
-  let proxiedPath = incoming.pathname.replace(/^\/api(?=\/|$)/, "") || "/";
+  let proxiedPath = incoming.pathname || "/";
+  if (backendPrefix) {
+    proxiedPath = proxiedPath.replace(/^\/api(?=\/|$)/, "") || "/";
+  }
   if (!proxiedPath.startsWith("/")) proxiedPath = `/${proxiedPath}`;
 
   const target = new URL(`${backendOrigin}${backendPrefix}${proxiedPath}`);
