@@ -37,6 +37,13 @@ export async function onRequest(context) {
   headers.delete("host");
   headers.set("x-forwarded-host", new URL(request.url).host);
   headers.set("x-forwarded-proto", "https");
+  if (env.BACKEND_SHARED_SECRET) {
+    headers.set("X-Backend-Secret", env.BACKEND_SHARED_SECRET);
+  }
+  if (env.CF_ACCESS_CLIENT_ID && env.CF_ACCESS_CLIENT_SECRET) {
+    headers.set("CF-Access-Client-Id", env.CF_ACCESS_CLIENT_ID);
+    headers.set("CF-Access-Client-Secret", env.CF_ACCESS_CLIENT_SECRET);
+  }
 
   const init = {
     method: request.method,

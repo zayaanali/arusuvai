@@ -16,6 +16,7 @@ const {
 const app = express();
 const port = Number(process.env.PORT || 8000);
 const host = process.env.HOST || "0.0.0.0";
+const backendSharedSecret = String(process.env.BACKEND_SHARED_SECRET || "");
 const model = process.env.OPENROUTER_MODEL || "openai/gpt-4.1-mini";
 const fallbackModel = process.env.OPENROUTER_FALLBACK_MODEL || "";
 const openai = process.env.OPENROUTER_API_KEY
@@ -38,6 +39,26 @@ const ADMIN_USERNAMES = new Set(
 
 app.use(express.json());
 app.use(express.static(path.join(process.cwd(), "public")));
+
+function isProtectedRoute(pathname) {
+  return pathname === "/health" || pathname === "/api" || pathname.startsWith("/api/");
+}
+
+function hasValidBackendSecret(req) {
+  const presented = String(req.headers["x-backend-secret"] || "");
+  if (!backendSharedSecret || !presented) return false;
+  const left = Buffer.from(backendSharedSecret, "utf8");
+  const right = Buffer.from(presented, "utf8");
+  if (left.length !== right.length) return false;
+  return crypto.timingSafeEqual(left, right);
+}
+
+app.use((req, res, next) => {
+  if (!backendSharedSecret) return next();
+  if (!isProtectedRoute(req.path)) return next();
+  if (hasValidBackendSecret(req)) return next();
+  return res.status(403).json({ error: "Forbidden" });
+});
 
 function toPantryRead(row) {
   return {

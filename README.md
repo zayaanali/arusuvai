@@ -92,3 +92,65 @@ npm run dev
 
 Keep CRUD endpoints deterministic and stable.
 Integrate your model in `POST /api/ai/chat`, and have it call internal pantry/recipe services instead of writing DB records directly.
+
+## Tailscale Funnel + Pages (no custom domain required)
+
+Use this pattern when your backend runs on your own machine and your frontend is on Cloudflare Pages.
+
+### 1) Run backend locally
+
+```bash
+PORT=8000 HOST=127.0.0.1 DB_PATH=/absolute/path/to/pantry-manager/data/pantry_manager.db npm start
+```
+
+Using `HOST=127.0.0.1` keeps Express bound to loopback only.
+
+### 2) Create and run a Tailscale Funnel
+
+```bash
+tailscale up
+tailscale funnel --bg 8000
+tailscale funnel status
+```
+
+Use the HTTPS URL from `tailscale funnel status` (example: `https://aether.tailbc021b.ts.net`).
+
+### 3) Configure Pages Function proxy
+
+Set these secrets in your Cloudflare Pages project:
+
+- `BACKEND_ORIGIN=https://<your-tailnet-funnel>.ts.net` (stored as secret for convenience)
+- `BACKEND_SHARED_SECRET=<long-random-secret>`
+
+You can set required secrets with one command:
+
+```bash
+scripts/configure_pages_secrets.sh <pages_project_name> https://<your-tailnet-funnel>.ts.net <backend_shared_secret> production
+```
+
+If you omit `<backend_shared_secret>`, the script will try to read `BACKEND_SHARED_SECRET` from local `.env`.
+If you are using Cloudflare Access in a custom-domain setup, set `CF_ACCESS_CLIENT_ID_INPUT` and `CF_ACCESS_CLIENT_SECRET_INPUT` in your shell before running the script.
+
+Your Pages API proxy (`functions/api/[[path]].js`) will automatically attach:
+
+- `X-Backend-Secret` when `BACKEND_SHARED_SECRET` is set
+- Access headers when both Access values are set
+
+### 4) Run backend as a Linux service
+
+1. Create app `.env`:
+
+```bash
+cp .env.example .env
+```
+
+2. Update `.env` values as needed (especially `DB_PATH`, `OPENROUTER_API_KEY`, and `ADMIN_USERNAMES`).
+3. Set the same random `BACKEND_SHARED_SECRET` value in both:
+   - backend `.env`
+   - Pages secret `BACKEND_SHARED_SECRET`
+
+3. Install backend service:
+
+```bash
+scripts/setup_backend_service.sh <linux_user> /absolute/path/to/pantry-manager
+```
