@@ -53,10 +53,18 @@ function hasValidBackendSecret(req) {
   return crypto.timingSafeEqual(left, right);
 }
 
+function isLoopbackAddress(remoteAddress) {
+  const value = String(remoteAddress || "").trim().toLowerCase();
+  if (!value) return false;
+  const normalized = value.startsWith("::ffff:") ? value.slice(7) : value;
+  return normalized === "127.0.0.1" || normalized === "::1";
+}
+
 app.use((req, res, next) => {
   if (!backendSharedSecret) return next();
   if (!isProtectedRoute(req.path)) return next();
   if (hasValidBackendSecret(req)) return next();
+  if (isLoopbackAddress(req.socket?.remoteAddress)) return next();
   return res.status(403).json({ error: "Forbidden" });
 });
 
@@ -93,6 +101,66 @@ function sanitizeChatHistory(rawHistory) {
     cleaned.push({ role, content });
   }
   return cleaned;
+}
+
+function extractAssistantContent(response) {
+  const content = response?.choices?.[0]?.message?.content;
+  if (typeof content === "string") return content.trim();
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((part) => {
+      if (typeof part === "string") return part;
+      if (!part || typeof part !== "object") return "";
+      if (typeof part.text === "string") return part.text;
+      if (typeof part.content === "string") return part.content;
+      return "";
+    })
+    .join("")
+    .trim();
+}
+
+function tryParseAssistantJson(rawContent) {
+  const source = String(rawContent || "").trim();
+  if (!source) return null;
+
+  const tryParse = (value) => {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return null;
+    }
+  };
+
+  const direct = tryParse(source);
+  if (direct && typeof direct === "object") return direct;
+
+  const fenced = source.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenced?.[1]) {
+    const parsedFence = tryParse(fenced[1].trim());
+    if (parsedFence && typeof parsedFence === "object") return parsedFence;
+  }
+
+  const firstBrace = source.indexOf("{");
+  const lastBrace = source.lastIndexOf("}");
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    const embedded = tryParse(source.slice(firstBrace, lastBrace + 1));
+    if (embedded && typeof embedded === "object") return embedded;
+  }
+
+  return null;
+}
+
+function looksLikeJson(raw) {
+  const text = String(raw || "").trim();
+  return text.startsWith("{") || text.startsWith("[") || text.includes("```json");
+}
+
+function isLowInformationReply(raw) {
+  const compact = String(raw || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[.!?]/g, "");
+  return !compact || compact === "done" || compact === "ok" || compact === "okay";
 }
 
 function hashPassword(password) {
@@ -215,6 +283,7 @@ async function requestAiPlan({ message, selectedModel, history, pantrySnapshot }
           "- If user asks to clear all pantry, use intent=clear_pantry.",
           "- Use prior user/assistant messages as conversation context.",
           "- Use pantry snapshot context to resolve references like 'it', 'them', or 'same as before'.",
+          "- If intent=reply, reply must be a non-empty, helpful natural-language response.",
           "- Otherwise use intent=reply with concise helpful text.",
         ].join("\n"),
       },
@@ -432,15 +501,11 @@ app.post("/api/ai/chat", requireAuth, async (req, res, next) => {
       response = await requestAiPlan({ message, selectedModel: fallbackModel, history, pantrySnapshot });
     }
 
-    const raw = response.choices?.[0]?.message?.content || "{}";
-    let parsed;
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      parsed = { intent: "reply", reply: "I could not parse that request. Please rephrase." };
-    }
+    const raw = extractAssistantContent(response);
+    const parsed = tryParseAssistantJson(raw) || {};
+    const intent = String(parsed?.intent || "reply").trim().toLowerCase();
+    const replyText = String(parsed?.reply || "").trim();
 
-    const intent = String(parsed?.intent || "reply");
     if (intent === "add_pantry") {
       const items = Array.isArray(parsed?.items) ? parsed.items : [];
       if (!items.length) {
@@ -498,10 +563,14 @@ app.post("/api/ai/chat", requireAuth, async (req, res, next) => {
       });
     }
 
-    return res.json({
-      reply: String(parsed?.reply || "Done."),
-      refresh_pantry: false,
-    });
+    const rawFallbackReply = !looksLikeJson(raw) ? raw.trim() : "";
+    const finalReply = !isLowInformationReply(replyText)
+      ? replyText
+      : !isLowInformationReply(rawFallbackReply)
+        ? rawFallbackReply
+        : "I understood your message, but I need more detail. Try a specific pantry request like 'add eggs, milk' or 'list pantry'.";
+
+    return res.json({ reply: finalReply, refresh_pantry: false });
   } catch (err) {
     if (err && (err.code === "insufficient_quota" || err.status === 429)) {
       return res.status(429).json({
