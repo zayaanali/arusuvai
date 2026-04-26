@@ -831,7 +831,16 @@ async function runAiMode(message) {
     body: JSON.stringify({ message, history: userMessageHistory }),
   });
 
-  addMessage("bot", data.reply || "AI response received.");
+  const reply = String(data?.reply || "").trim();
+  const compactReply = reply.toLowerCase().replace(/[.!?]/g, "");
+  const isTrivialReply =
+    !compactReply || compactReply === "done" || compactReply === "ok" || compactReply === "okay";
+  addMessage(
+    "bot",
+    isTrivialReply
+      ? "AI backend returned a placeholder response. Try again, or switch off Use AI and run a manual command."
+      : reply
+  );
   if (data.refresh_pantry) {
     await refreshPantry();
   }

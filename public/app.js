@@ -38,6 +38,15 @@ function numOrNull(value) {
   return Number.isNaN(n) ? null : n;
 }
 
+function sanitizeAiReply(reply) {
+  const text = String(reply || "").trim();
+  const compact = text.toLowerCase().replace(/[.!?]/g, "");
+  if (!compact || compact === "done" || compact === "ok" || compact === "okay") {
+    return "AI backend returned a placeholder response. Try again with a more specific pantry request.";
+  }
+  return text;
+}
+
 async function refreshPantry() {
   const items = await api("/pantry");
   show(pantryOutput, items);
@@ -125,7 +134,7 @@ document.getElementById("ai-form").addEventListener("submit", async (event) => {
       method: "POST",
       body: JSON.stringify({ message: form.get("message") }),
     });
-    show(aiOutput, reply);
+    show(aiOutput, { ...reply, reply: sanitizeAiReply(reply?.reply) });
     event.target.reset();
   } catch (err) {
     status("AI request failed", err.message);
