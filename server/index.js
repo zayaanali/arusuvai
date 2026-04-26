@@ -262,7 +262,7 @@ function shouldGrantAdmin({ username }) {
   return ADMIN_USERNAMES.has(username);
 }
 
-async function requestAiPlan({ message, selectedModel, history, pantrySnapshot }) {
+async function requestAiPlan({ message, selectedModel, history, pantrySnapshot, recoveryHint = "" }) {
   let priorMessages = Array.isArray(history) ? [...history] : [];
   const last = priorMessages[priorMessages.length - 1];
   if (last?.role === "user" && String(last.content || "").trim() === String(message || "").trim()) {
@@ -300,6 +300,19 @@ async function requestAiPlan({ message, selectedModel, history, pantrySnapshot }
         role: "system",
         content: `Current pantry snapshot JSON:\n${JSON.stringify(Array.isArray(pantrySnapshot) ? pantrySnapshot : [])}`,
       },
+      ...(recoveryHint
+        ? [
+            {
+              role: "system",
+              content: [
+                "Previous output was invalid, too short, or placeholder-like.",
+                "Return one complete JSON object only, following the exact schema.",
+                "Do not return values like 'done', 'ok', or empty reply text.",
+                `Recovery hint: ${recoveryHint}`,
+              ].join("\n"),
+            },
+          ]
+        : []),
       ...priorMessages,
       {
         role: "user",
@@ -406,6 +419,35 @@ async function removePantryByNames(userId, names) {
   return removed;
 }
 
+async function requestAiPlanWithFallback({ message, history, pantrySnapshot, recoveryHint = "" }) {
+  try {
+    return await requestAiPlan({
+      message,
+      selectedModel: model,
+      history,
+      pantrySnapshot,
+      recoveryHint,
+    });
+  } catch (primaryErr) {
+    const isProviderUnavailable =
+      primaryErr?.status === 502 ||
+      primaryErr?.status === 503 ||
+      primaryErr?.status === 504 ||
+      /provider returned error/i.test(String(primaryErr?.message || ""));
+    const canFallback = Boolean(fallbackModel && fallbackModel !== model);
+    if (!(isProviderUnavailable && canFallback)) {
+      throw primaryErr;
+    }
+    return requestAiPlan({
+      message,
+      selectedModel: fallbackModel,
+      history,
+      pantrySnapshot,
+      recoveryHint,
+    });
+  }
+}
+
 app.get("/health", (_req, res) => {
   res.json({
     status: "ok",
@@ -494,26 +536,30 @@ app.post("/api/ai/chat", requireAuth, async (req, res, next) => {
       [req.user.id]
     );
 
-    let response;
-    try {
-      response = await requestAiPlan({ message, selectedModel: model, history, pantrySnapshot });
-    } catch (primaryErr) {
-      const isProviderUnavailable =
-        primaryErr?.status === 502 ||
-        primaryErr?.status === 503 ||
-        primaryErr?.status === 504 ||
-        /provider returned error/i.test(String(primaryErr?.message || ""));
-      const canFallback = Boolean(fallbackModel && fallbackModel !== model);
-      if (!(isProviderUnavailable && canFallback)) {
-        throw primaryErr;
-      }
-      response = await requestAiPlan({ message, selectedModel: fallbackModel, history, pantrySnapshot });
-    }
+    let response = await requestAiPlanWithFallback({ message, history, pantrySnapshot });
+    let raw = extractAssistantContent(response);
+    let parsed = tryParseAssistantJson(raw) || {};
+    let intent = String(parsed?.intent || "reply").trim().toLowerCase();
+    let replyText = String(parsed?.reply || "").trim();
 
-    const raw = extractAssistantContent(response);
-    const parsed = tryParseAssistantJson(raw) || {};
-    const intent = String(parsed?.intent || "reply").trim().toLowerCase();
-    const replyText = String(parsed?.reply || "").trim();
+    const needsRecoveryPass =
+      isLowInformationReply(raw) ||
+      (intent === "reply" && isLowInformationReply(replyText)) ||
+      (!tryParseAssistantJson(raw) && looksLikeJson(raw));
+
+    if (needsRecoveryPass) {
+      const rawSnippet = String(raw || "").replace(/\s+/g, " ").trim().slice(0, 160);
+      response = await requestAiPlanWithFallback({
+        message,
+        history,
+        pantrySnapshot,
+        recoveryHint: rawSnippet || "Missing/placeholder response",
+      });
+      raw = extractAssistantContent(response);
+      parsed = tryParseAssistantJson(raw) || {};
+      intent = String(parsed?.intent || "reply").trim().toLowerCase();
+      replyText = String(parsed?.reply || "").trim();
+    }
 
     if (intent === "add_pantry") {
       const items = Array.isArray(parsed?.items) ? parsed.items : [];
