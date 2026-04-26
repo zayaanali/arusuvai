@@ -53,18 +53,27 @@ function hasValidBackendSecret(req) {
   return crypto.timingSafeEqual(left, right);
 }
 
-function isLoopbackAddress(remoteAddress) {
+function isTrustedLocalAddress(remoteAddress) {
   const value = String(remoteAddress || "").trim().toLowerCase();
   if (!value) return false;
   const normalized = value.startsWith("::ffff:") ? value.slice(7) : value;
-  return normalized === "127.0.0.1" || normalized === "::1";
+  if (normalized === "127.0.0.1" || normalized === "::1") return true;
+
+  if (/^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(normalized)) return true;
+  if (/^192\.168\.\d{1,3}\.\d{1,3}$/.test(normalized)) return true;
+  if (/^172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}$/.test(normalized)) return true;
+  if (/^169\.254\.\d{1,3}\.\d{1,3}$/.test(normalized)) return true;
+
+  if (normalized.startsWith("fc") || normalized.startsWith("fd")) return true;
+  if (normalized.startsWith("fe80:")) return true;
+  return false;
 }
 
 app.use((req, res, next) => {
   if (!backendSharedSecret) return next();
   if (!isProtectedRoute(req.path)) return next();
   if (hasValidBackendSecret(req)) return next();
-  if (isLoopbackAddress(req.socket?.remoteAddress)) return next();
+  if (isTrustedLocalAddress(req.socket?.remoteAddress)) return next();
   return res.status(403).json({ error: "Forbidden" });
 });
 
