@@ -175,3 +175,24 @@ Optional arguments:
 ```bash
 scripts/push_and_deploy.sh /opt/pantry-manager pantry-manager.service
 ```
+
+By default this also creates a production DB backup before install/restart.
+To skip that backup for one run:
+
+```bash
+SKIP_DB_BACKUP=1 scripts/push_and_deploy.sh
+```
+
+### Production DB backups
+
+Manual backup command:
+
+```bash
+scripts/backup_production_db.sh /opt/pantry-manager/.env /opt/pantry-manager/backups 14
+```
+
+This will:
+
+- read `DB_PATH` from `/opt/pantry-manager/.env`
+- create a timestamped `.db` snapshot in `/opt/pantry-manager/backups`
+- remove backup files older than `14` days

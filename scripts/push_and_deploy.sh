@@ -12,6 +12,7 @@ Defaults:
 
 Environment:
   REMOTE_NAME=origin   (optional git remote override)
+  SKIP_DB_BACKUP=1     (skip pre-deploy DB backup)
 EOF
   exit 0
 fi
@@ -55,6 +56,14 @@ rsync -az --delete \
   --exclude "pantry_manager.db" \
   --exclude "data/*.db" \
   ./ "$DEPLOY_PATH/"
+
+if [[ "${SKIP_DB_BACKUP:-0}" != "1" ]]; then
+  echo "Creating production DB backup..."
+  "${DEPLOY_PATH}/scripts/backup_production_db.sh" \
+    "${DEPLOY_PATH}/.env" \
+    "${DEPLOY_PATH}/backups" \
+    "14"
+fi
 
 echo "Installing production dependencies..."
 npm ci --omit=dev --prefix "$DEPLOY_PATH"
