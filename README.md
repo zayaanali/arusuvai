@@ -154,3 +154,24 @@ cp .env.example .env
 ```bash
 scripts/setup_backend_service.sh <linux_user> /absolute/path/to/pantry-manager
 ```
+
+### Push + Deploy from local machine
+
+If you prefer not to grant GitHub Actions SSH access, use:
+
+```bash
+scripts/push_and_deploy.sh
+```
+
+This local script will:
+
+- `git push` your current branch to `origin`
+- sync repo files to `/opt/pantry-manager` (preserving server `.env` and DB files)
+- run `npm ci --omit=dev` in deploy path
+- restart `pantry-manager.service`
+
+Optional arguments:
+
+```bash
+scripts/push_and_deploy.sh /opt/pantry-manager pantry-manager.service
+```
