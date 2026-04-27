@@ -29,7 +29,7 @@ const registerFeedbackEl = document.getElementById("register-feedback");
 const logoutBtn = document.getElementById("logout-btn");
 const API_BASE_URL = "/api";
 const AUTH_TOKEN_KEY = "pantry_auth_token";
-const DEFAULT_AI_MODE = false;
+const DEFAULT_MANUAL_MODE = false;
 const userMessageHistory = [];
 let lastPantryItems = [];
 let editingPantryItemId = null;
@@ -49,7 +49,7 @@ Pantry Basics
   Removes matching pantry items.
 
 - list
-  Shows all pantry items in the snapshot panel.
+  Shows all pantry items in the pantry panel.
 
 - drop_table
   Clears the entire pantry.
@@ -348,48 +348,87 @@ function renderPantry(items) {
   pantryMeta.textContent = `${items.length} item${items.length === 1 ? "" : "s"} in pantry`;
 
   const displayName = (item) => item?.name || item?.canonical_name || item?.display_name || "unnamed item";
-  const sorted = [...items].sort((a, b) => displayName(a).localeCompare(displayName(b)));
+  const normalizeCategory = (item) => normalizeName(item?.category || "") || "uncategorized";
+  const titleCase = (value) =>
+    String(value || "")
+      .split(" ")
+      .filter(Boolean)
+      .map((word) => word[0].toUpperCase() + word.slice(1))
+      .join(" ");
+
+  const sorted = [...items].sort((a, b) => {
+    const catCompare = normalizeCategory(a).localeCompare(normalizeCategory(b));
+    if (catCompare !== 0) return catCompare;
+    return displayName(a).localeCompare(displayName(b));
+  });
+
+  const grouped = new Map();
   for (const item of sorted) {
-    const card = document.createElement("div");
-    card.className = "pantry-item";
-    const isEditing = editingPantryItemId === item.id;
+    const category = normalizeCategory(item);
+    if (!grouped.has(category)) grouped.set(category, []);
+    grouped.get(category).push(item);
+  }
 
-    const days = daysUntil(item.expires_at);
-    const expiryLine = !item.expires_at
-      ? "No expiry date"
-      : days < 0
-        ? `<span class=\"warn\">Expired ${Math.abs(days)} day(s) ago</span>`
-        : days <= 7
-          ? `<span class=\"warn\">Expires in ${days} day(s)</span>`
-          : `Expires in ${days} day(s)`;
+  const categoryOrder = Array.from(grouped.keys()).sort((a, b) => {
+    if (a === "uncategorized") return 1;
+    if (b === "uncategorized") return -1;
+    return a.localeCompare(b);
+  });
 
-    card.innerHTML = `
-      <h3>${displayName(item)}</h3>
-      <p><strong>${item.quantity}</strong> ${item.unit}</p>
-      <p>${expiryLine}</p>
-      <span class="tag">${item.category}</span>
+  for (const category of categoryOrder) {
+    const section = document.createElement("section");
+    section.className = "pantry-group";
+    const groupItems = grouped.get(category) || [];
+    section.innerHTML = `
+      <h3 class="pantry-group-title">
+        <span>${titleCase(category)}</span>
+        <span class="pantry-group-count">${groupItems.length}</span>
+      </h3>
     `;
 
-    const actions = document.createElement("div");
-    actions.className = "pantry-actions";
-    const editBtn = document.createElement("button");
-    editBtn.type = "button";
-    editBtn.className = "ghost pantry-edit-btn";
-    editBtn.textContent = isEditing ? "Close" : "Edit";
-    editBtn.addEventListener("click", () => {
-      if (isEditing) {
-        stopEditingPantryItem();
-        return;
-      }
-      startEditingPantryItem(item.id);
-    });
-    actions.appendChild(editBtn);
-    card.appendChild(actions);
+    for (const item of groupItems) {
+      const card = document.createElement("div");
+      card.className = "pantry-item";
+      const isEditing = editingPantryItemId === item.id;
 
-    if (isEditing) {
-      const form = document.createElement("form");
-      form.className = "pantry-edit-form";
-      form.innerHTML = `
+      const days = daysUntil(item.expires_at);
+      const expiryLine = !item.expires_at
+        ? "No expiry"
+        : days < 0
+          ? `<span class=\"warn\">Expired ${Math.abs(days)}d ago</span>`
+          : days <= 7
+            ? `<span class=\"warn\">Expires in ${days}d</span>`
+            : `Expires in ${days}d`;
+
+      card.innerHTML = `
+        <div class="pantry-item-row">
+          <div class="pantry-item-main">
+            <h4>${displayName(item)}</h4>
+            <p><strong>${item.quantity}</strong> ${item.unit || "unit"} • ${expiryLine}</p>
+          </div>
+        </div>
+      `;
+
+      const actions = document.createElement("div");
+      actions.className = "pantry-actions";
+      const editBtn = document.createElement("button");
+      editBtn.type = "button";
+      editBtn.className = "ghost pantry-edit-btn";
+      editBtn.textContent = isEditing ? "Close" : "Edit";
+      editBtn.addEventListener("click", () => {
+        if (isEditing) {
+          stopEditingPantryItem();
+          return;
+        }
+        startEditingPantryItem(item.id);
+      });
+      actions.appendChild(editBtn);
+      card.querySelector(".pantry-item-row")?.appendChild(actions);
+
+      if (isEditing) {
+        const form = document.createElement("form");
+        form.className = "pantry-edit-form";
+        form.innerHTML = `
         <label>
           Category
           <input name="category" value="${escapeHtml(item.category || "")}" placeholder="uncategorized" />
@@ -408,48 +447,51 @@ function renderPantry(items) {
         </div>
       `;
 
-      form.addEventListener("submit", async (event) => {
-        event.preventDefault();
-        const categoryInput = String(form.elements.category?.value || "");
-        const unitInput = String(form.elements.unit?.value || "");
-        const expiryInput = String(form.elements.expires_at?.value || "").trim();
-        const category = normalizeName(categoryInput) || "uncategorized";
-        const unit = normalizeName(unitInput) || "unit";
-        if (expiryInput && !isValidDateInput(expiryInput)) {
-          addMessage("bot", "Date must be YYYY-MM-DD.");
-          return;
-        }
+        form.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          const categoryInput = String(form.elements.category?.value || "");
+          const unitInput = String(form.elements.unit?.value || "");
+          const expiryInput = String(form.elements.expires_at?.value || "").trim();
+          const category = normalizeName(categoryInput) || "uncategorized";
+          const unit = normalizeName(unitInput) || "unit";
+          if (expiryInput && !isValidDateInput(expiryInput)) {
+            addMessage("bot", "Date must be YYYY-MM-DD.");
+            return;
+          }
 
-        const buttons = Array.from(form.querySelectorAll("button"));
-        buttons.forEach((btn) => {
-          btn.disabled = true;
-        });
-        try {
-          await api(`/pantry/${item.id}`, {
-            method: "PATCH",
-            body: JSON.stringify({
-              category,
-              unit,
-              expires_at: expiryInput || null,
-            }),
-          });
-          editingPantryItemId = null;
-          await refreshPantry();
-          addMessage("bot", `Updated ${displayName(item)}: category=${category}, unit=${unit}, expiry=${expiryInput || "none"}.`);
-        } catch (err) {
-          addMessage("bot", `Failed to update ${displayName(item)}: ${err.message}`);
+          const buttons = Array.from(form.querySelectorAll("button"));
           buttons.forEach((btn) => {
-            btn.disabled = false;
+            btn.disabled = true;
           });
-        }
-      });
+          try {
+            await api(`/pantry/${item.id}`, {
+              method: "PATCH",
+              body: JSON.stringify({
+                category,
+                unit,
+                expires_at: expiryInput || null,
+              }),
+            });
+            editingPantryItemId = null;
+            await refreshPantry();
+            addMessage("bot", `Updated ${displayName(item)}: category=${category}, unit=${unit}, expiry=${expiryInput || "none"}.`);
+          } catch (err) {
+            addMessage("bot", `Failed to update ${displayName(item)}: ${err.message}`);
+            buttons.forEach((btn) => {
+              btn.disabled = false;
+            });
+          }
+        });
 
-      form.querySelector(".pantry-cancel-btn")?.addEventListener("click", () => {
-        stopEditingPantryItem();
-      });
-      card.appendChild(form);
+        form.querySelector(".pantry-cancel-btn")?.addEventListener("click", () => {
+          stopEditingPantryItem();
+        });
+        card.appendChild(form);
+      }
+
+      section.appendChild(card);
     }
-    pantryList.appendChild(card);
+    pantryList.appendChild(section);
   }
 }
 
@@ -525,7 +567,7 @@ async function runManualCommand(message) {
 
   if (parsed.command === "list") {
     await refreshPantry();
-    addMessage("bot", "Pantry listed in the snapshot panel.");
+    addMessage("bot", "Pantry listed in the pantry panel.");
     return;
   }
 
@@ -838,7 +880,7 @@ async function runAiMode(message) {
   addMessage(
     "bot",
     isTrivialReply
-      ? "AI backend returned a placeholder response. Try again, or switch off Use AI and run a manual command."
+      ? "AI backend returned a placeholder response. Try again, or turn on Manual mode and run a manual command."
       : reply
   );
   if (data.refresh_pantry) {
@@ -851,10 +893,10 @@ async function handleChat(message) {
   addMessage("user", message);
   userMessageHistory.push(message);
   if (useAiToggle.checked) {
-    await runAiMode(message);
+    await runManualCommand(message);
     return;
   }
-  await runManualCommand(message);
+  await runAiMode(message);
 }
 
 chatForm.addEventListener("submit", async (e) => {
@@ -1015,18 +1057,14 @@ document.addEventListener("keydown", (event) => {
 
 useAiToggle.addEventListener("change", () => {
   if (useAiToggle.checked) {
-    addMessage("bot", "Use AI is ON. Messages now go to /api/ai/chat.");
-  } else {
-    addMessage("bot", `Use AI is OFF. ${MANUAL_HELP}`);
+    addMessage("bot", `Manual mode is ON. ${MANUAL_HELP}`);
   }
 });
 
 (async function init() {
   // Force a predictable startup mode; some browsers may restore prior toggle state.
-  useAiToggle.checked = DEFAULT_AI_MODE;
-  if (DEFAULT_AI_MODE) {
-    addMessage("bot", "Use AI is ON. Messages now go to /api/ai/chat.");
-  } else {
+  useAiToggle.checked = DEFAULT_MANUAL_MODE;
+  if (DEFAULT_MANUAL_MODE) {
     addMessage("bot", `Manual mode ready. ${MANUAL_HELP}`);
   }
   renderAuthState();

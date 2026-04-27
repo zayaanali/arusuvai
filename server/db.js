@@ -57,6 +57,7 @@ async function ensureUsersTable() {
       username TEXT NOT NULL UNIQUE,
       password_hash TEXT NOT NULL,
       is_admin INTEGER NOT NULL DEFAULT 0,
+      preferences TEXT NOT NULL DEFAULT '',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     )
@@ -66,6 +67,10 @@ async function ensureUsersTable() {
   const hasAdminColumn = columns.some((col) => col.name === "is_admin");
   if (!hasAdminColumn) {
     await run("ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0");
+  }
+  const hasPreferencesColumn = columns.some((col) => col.name === "preferences");
+  if (!hasPreferencesColumn) {
+    await run("ALTER TABLE users ADD COLUMN preferences TEXT NOT NULL DEFAULT ''");
   }
 }
 

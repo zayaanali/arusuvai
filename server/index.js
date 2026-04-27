@@ -198,11 +198,17 @@ function parseBearerToken(req) {
   return match ? match[1].trim() : "";
 }
 
+function sanitizeUserPreferences(raw) {
+  const value = String(raw == null ? "" : raw).replace(/\r\n/g, "\n").trim();
+  return value.length > 600 ? value.slice(0, 600) : value;
+}
+
 function toAuthUser(row) {
   return {
     id: row.id,
     username: row.username,
     is_admin: Boolean(row.is_admin),
+    preferences: sanitizeUserPreferences(row.preferences),
   };
 }
 
@@ -221,7 +227,7 @@ async function createSession(userId) {
 async function resolveSession(token) {
   const tokenHash = hashToken(token);
   const row = await get(
-    `SELECT s.id AS session_id, s.user_id, u.username, u.is_admin
+    `SELECT s.id AS session_id, s.user_id, u.username, u.is_admin, u.preferences
      FROM sessions s
      JOIN users u ON u.id = s.user_id
      WHERE s.token_hash = ?`,
@@ -237,6 +243,7 @@ async function resolveSession(token) {
       id: row.user_id,
       username: row.username,
       is_admin: Boolean(row.is_admin),
+      preferences: sanitizeUserPreferences(row.preferences),
     },
   };
 }
@@ -262,12 +269,13 @@ function shouldGrantAdmin({ username }) {
   return ADMIN_USERNAMES.has(username);
 }
 
-async function requestAiPlan({ message, selectedModel, history, pantrySnapshot, recoveryHint = "" }) {
+async function requestAiPlan({ message, selectedModel, history, pantrySnapshot, userPreferences = "", recoveryHint = "" }) {
   let priorMessages = Array.isArray(history) ? [...history] : [];
   const last = priorMessages[priorMessages.length - 1];
   if (last?.role === "user" && String(last.content || "").trim() === String(message || "").trim()) {
     priorMessages = priorMessages.slice(0, -1);
   }
+  const safePreferences = sanitizeUserPreferences(userPreferences);
 
   return openai.chat.completions.create({
     model: selectedModel,
@@ -292,6 +300,9 @@ async function requestAiPlan({ message, selectedModel, history, pantrySnapshot, 
           "- If user asks to clear all pantry, use intent=clear_pantry.",
           "- Use prior user/assistant messages as conversation context.",
           "- Use pantry snapshot context to resolve references like 'it', 'them', or 'same as before'.",
+          "- User preferences (if present) are LOW-to-MEDIUM weight guidance, not hard constraints.",
+          "- Never override the user's explicit current message just to satisfy preferences.",
+          "- Never invent pantry facts or ignore pantry data to satisfy preferences.",
           "- If intent=reply, reply must be a non-empty, helpful natural-language response.",
           "- Otherwise use intent=reply with concise helpful text.",
         ].join("\n"),
@@ -300,6 +311,14 @@ async function requestAiPlan({ message, selectedModel, history, pantrySnapshot, 
         role: "system",
         content: `Current pantry snapshot JSON:\n${JSON.stringify(Array.isArray(pantrySnapshot) ? pantrySnapshot : [])}`,
       },
+      ...(safePreferences
+        ? [
+            {
+              role: "system",
+              content: `User preferences (soft guidance, low/medium influence):\n${safePreferences}`,
+            },
+          ]
+        : []),
       ...(recoveryHint
         ? [
             {
@@ -419,13 +438,14 @@ async function removePantryByNames(userId, names) {
   return removed;
 }
 
-async function requestAiPlanWithFallback({ message, history, pantrySnapshot, recoveryHint = "" }) {
+async function requestAiPlanWithFallback({ message, history, pantrySnapshot, userPreferences = "", recoveryHint = "" }) {
   try {
     return await requestAiPlan({
       message,
       selectedModel: model,
       history,
       pantrySnapshot,
+      userPreferences,
       recoveryHint,
     });
   } catch (primaryErr) {
@@ -443,6 +463,7 @@ async function requestAiPlanWithFallback({ message, history, pantrySnapshot, rec
       selectedModel: fallbackModel,
       history,
       pantrySnapshot,
+      userPreferences,
       recoveryHint,
     });
   }
@@ -468,6 +489,7 @@ app.post("/api/auth/register", async (req, res, next) => {
   try {
     const username = normalizeName(req.body?.username);
     const password = String(req.body?.password || "");
+    const preferences = sanitizeUserPreferences(req.body?.preferences);
 
     if (!username) return badRequest(res, "username is required");
     if (username.length < 3) return badRequest(res, "username must be at least 3 characters");
@@ -479,12 +501,12 @@ app.post("/api/auth/register", async (req, res, next) => {
     const now = new Date().toISOString();
 
     const created = await run(
-      `INSERT INTO users (username, password_hash, is_admin, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?)`,
-      [username, hashPassword(password), isAdmin, now, now]
+      `INSERT INTO users (username, password_hash, is_admin, preferences, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [username, hashPassword(password), isAdmin, preferences, now, now]
     );
 
-    const user = await get("SELECT id, username, is_admin FROM users WHERE id = ?", [created.id]);
+    const user = await get("SELECT id, username, is_admin, preferences FROM users WHERE id = ?", [created.id]);
     const token = await createSession(user.id);
     return res.status(201).json({ token, user: toAuthUser(user) });
   } catch (err) {
@@ -515,6 +537,21 @@ app.get("/api/auth/me", requireAuth, async (req, res) => {
   res.json({ user: req.user });
 });
 
+app.patch("/api/auth/preferences", requireAuth, async (req, res, next) => {
+  try {
+    const preferences = sanitizeUserPreferences(req.body?.preferences);
+    await run("UPDATE users SET preferences = ?, updated_at = ? WHERE id = ?", [
+      preferences,
+      new Date().toISOString(),
+      req.user.id,
+    ]);
+    const user = await get("SELECT id, username, is_admin, preferences FROM users WHERE id = ?", [req.user.id]);
+    res.json({ user: toAuthUser(user) });
+  } catch (err) {
+    next(err);
+  }
+});
+
 app.post("/api/auth/logout", requireAuth, async (req, res, next) => {
   try {
     await run("DELETE FROM sessions WHERE id = ?", [req.sessionId]);
@@ -536,7 +573,12 @@ app.post("/api/ai/chat", requireAuth, async (req, res, next) => {
       [req.user.id]
     );
 
-    let response = await requestAiPlanWithFallback({ message, history, pantrySnapshot });
+    let response = await requestAiPlanWithFallback({
+      message,
+      history,
+      pantrySnapshot,
+      userPreferences: req.user.preferences,
+    });
     let raw = extractAssistantContent(response);
     let parsed = tryParseAssistantJson(raw) || {};
     let intent = String(parsed?.intent || "reply").trim().toLowerCase();
@@ -553,6 +595,7 @@ app.post("/api/ai/chat", requireAuth, async (req, res, next) => {
         message,
         history,
         pantrySnapshot,
+        userPreferences: req.user.preferences,
         recoveryHint: rawSnippet || "Missing/placeholder response",
       });
       raw = extractAssistantContent(response);

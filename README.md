@@ -63,6 +63,7 @@ npm run dev
 - `POST /api/auth/register`
 - `POST /api/auth/login`
 - `GET /api/auth/me` (Bearer token required)
+- `PATCH /api/auth/preferences` (Bearer token required)
 - `POST /api/auth/logout` (Bearer token required)
 - `GET /api/pantry`
 - `POST /api/pantry`
@@ -83,6 +84,9 @@ npm run dev
 
 - Each account has `username` + password auth and its own pantry records.
 - Send `Authorization: Bearer <token>` for pantry and AI endpoints.
+- User profile includes a `preferences` text field for cuisine/style guidance.
+- Update preferences via `PATCH /api/auth/preferences` with JSON body like:
+  - `{ "preferences": "Prefer South Indian vegetarian meals; avoid deep fried; prioritize high-protein dinners." }`
 - A global item catalog (`global_items`) is upserted before pantry item creation.
 - Pantry add auto-loads default `unit` and `category` from the global catalog when fields are omitted.
 - Admin users can set global defaults by updating item `unit`/`category`.

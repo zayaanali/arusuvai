@@ -296,44 +296,81 @@ button {
 .pantry-list {
   padding: 0 10px 10px;
   display: grid;
-  gap: 8px;
+  gap: 10px;
   max-height: 64vh;
   overflow-y: auto;
 }
 
-.pantry-item {
-  border: 1px solid #d4e7da;
-  border-radius: 12px;
-  background: #f5fbf7;
-  padding: 10px;
+.pantry-group {
+  border: 1px solid #dbece1;
+  border-radius: 10px;
+  background: #f7fcf9;
+  overflow: hidden;
 }
 
-.pantry-item h3 {
-  margin: 0 0 4px;
-  font-size: 1rem;
+.pantry-group-title {
+  margin: 0;
+  padding: 7px 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid #dbece1;
+  font-size: 0.82rem;
+  color: #2b5f41;
+  text-transform: capitalize;
+  background: #eef7f1;
+}
+
+.pantry-group-count {
+  font-size: 0.75rem;
+  color: #4f7560;
+}
+
+.pantry-item {
+  border-top: 1px solid #e4f1e9;
+  background: #f7fcf9;
+  padding: 6px 10px;
+}
+
+.pantry-group .pantry-item:first-of-type {
+  border-top: none;
+}
+
+.pantry-item-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.pantry-item h4 {
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.2;
   text-transform: capitalize;
 }
 
 .pantry-item p {
-  margin: 2px 0;
-  font-size: 0.87rem;
+  margin: 1px 0 0;
+  font-size: 0.78rem;
+  line-height: 1.2;
   color: var(--muted);
 }
 
 .pantry-actions {
-  margin-top: 8px;
   display: flex;
   justify-content: flex-end;
 }
 
 .pantry-edit-btn {
-  padding: 6px 10px;
+  padding: 4px 8px;
+  font-size: 0.75rem;
 }
 
 .pantry-edit-form {
-  margin-top: 10px;
+  margin-top: 6px;
   display: grid;
-  gap: 8px;
+  gap: 6px;
 }
 
 .pantry-edit-form label {
@@ -346,8 +383,8 @@ button {
 .pantry-edit-form input {
   width: 100%;
   box-sizing: border-box;
-  padding: 8px;
-  font-size: 0.9rem;
+  padding: 6px;
+  font-size: 0.82rem;
 }
 
 .pantry-edit-actions {
@@ -358,16 +395,6 @@ button {
 
 .pantry-edit-actions button {
   padding: 7px 10px;
-}
-
-.tag {
-  display: inline-block;
-  margin-top: 6px;
-  font-size: 0.75rem;
-  background: #e9f4ed;
-  border: 1px solid #cfe1d6;
-  padding: 3px 8px;
-  border-radius: 999px;
 }
 
 .warn {
