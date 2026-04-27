@@ -348,6 +348,58 @@ function parseCsvList(raw) {
     .filter(Boolean);
 }
 
+function isRecipeRecommendationMessage(rawMessage) {
+  const message = String(rawMessage || "").trim().toLowerCase();
+  if (!message) return false;
+
+  const pantryActionPrefixes = [
+    "add ",
+    "rm ",
+    "remove ",
+    "delete ",
+    "list",
+    "clear",
+    "drop_table",
+    "set ",
+    "use ",
+    "discard ",
+    "inc ",
+    "dec ",
+    "rename ",
+    "category ",
+    "expiry ",
+    "find ",
+    "expiring ",
+    "shopping ",
+  ];
+  if (pantryActionPrefixes.some((prefix) => message.startsWith(prefix))) return false;
+
+  const recipeSignals = [
+    "recipe",
+    "recipes",
+    "meal",
+    "meals",
+    "what can i make",
+    "what should i cook",
+    "what can i cook",
+    "cook with",
+    "make with",
+    "dinner idea",
+    "lunch idea",
+    "breakfast idea",
+  ];
+  return recipeSignals.some((signal) => message.includes(signal));
+}
+
+function extractRequestedRecipeCount(rawMessage, fallback = 5) {
+  const message = String(rawMessage || "").toLowerCase();
+  const match = message.match(/\b(\d{1,2})\s+(recipes?|meals?|ideas?)\b/);
+  if (!match) return fallback;
+  const n = Number(match[1]);
+  if (Number.isNaN(n)) return fallback;
+  return Math.min(Math.max(n, 1), 10);
+}
+
 async function upsertGlobalItemDefinition({ name, unit = null, category = null, allowOverride = false }) {
   const normalizedName = normalizeName(name);
   if (!normalizedName) return null;
@@ -469,6 +521,63 @@ async function requestAiPlanWithFallback({ message, history, pantrySnapshot, use
   }
 }
 
+async function requestAiRecipeSuggestions({
+  selectedModel,
+  pantrySnapshot,
+  userPreferences = "",
+  userPrompt = "",
+  count = 5,
+  recoveryHint = "",
+}) {
+  const safeCount = Math.min(Math.max(Number(count) || 5, 1), 10);
+  const safePreferences = sanitizeUserPreferences(userPreferences);
+
+  return openai.chat.completions.create({
+    model: selectedModel,
+    max_tokens: 500,
+    temperature: 0.5,
+    messages: [
+      {
+        role: "system",
+        content: [
+          "You are a fast pantry recipe assistant.",
+          `Suggest exactly ${safeCount} recipes the user can make from pantry items.`,
+          "Output as a numbered markdown list.",
+          "For each recipe include: name, pantry items used, and short steps.",
+          "If a recipe needs 1-2 missing ingredients, mention them briefly as optional add-ons.",
+          "Keep response concise and practical.",
+          "Use user preferences as LOW-to-MEDIUM influence only.",
+          "Do not ignore pantry data or user's direct request.",
+        ].join("\n"),
+      },
+      {
+        role: "system",
+        content: `Current pantry snapshot JSON:\n${JSON.stringify(Array.isArray(pantrySnapshot) ? pantrySnapshot : [])}`,
+      },
+      ...(safePreferences
+        ? [
+            {
+              role: "system",
+              content: `User preferences (soft guidance):\n${safePreferences}`,
+            },
+          ]
+        : []),
+      ...(recoveryHint
+        ? [
+            {
+              role: "system",
+              content: `Previous answer was too short/invalid. Recovery hint: ${recoveryHint}`,
+            },
+          ]
+        : []),
+      {
+        role: "user",
+        content: String(userPrompt || "").trim() || "What can I make?",
+      },
+    ],
+  });
+}
+
 app.get("/health", (_req, res) => {
   res.json({
     status: "ok",
@@ -573,6 +682,50 @@ app.post("/api/ai/chat", requireAuth, async (req, res, next) => {
       [req.user.id]
     );
 
+    if (isRecipeRecommendationMessage(message)) {
+      const count = extractRequestedRecipeCount(message, 5);
+      const requestWithFallback = async (recoveryHint = "") => {
+        try {
+          return await requestAiRecipeSuggestions({
+            selectedModel: model,
+            pantrySnapshot,
+            userPreferences: req.user.preferences,
+            userPrompt: message,
+            count,
+            recoveryHint,
+          });
+        } catch (primaryErr) {
+          const isProviderUnavailable =
+            primaryErr?.status === 502 ||
+            primaryErr?.status === 503 ||
+            primaryErr?.status === 504 ||
+            /provider returned error/i.test(String(primaryErr?.message || ""));
+          const canFallback = Boolean(fallbackModel && fallbackModel !== model);
+          if (!(isProviderUnavailable && canFallback)) throw primaryErr;
+          return requestAiRecipeSuggestions({
+            selectedModel: fallbackModel,
+            pantrySnapshot,
+            userPreferences: req.user.preferences,
+            userPrompt: message,
+            count,
+            recoveryHint,
+          });
+        }
+      };
+
+      let recipeResponse = await requestWithFallback();
+      let recipeRaw = extractAssistantContent(recipeResponse);
+      if (isLowInformationReply(recipeRaw)) {
+        const rawSnippet = String(recipeRaw || "").replace(/\s+/g, " ").trim().slice(0, 160);
+        recipeResponse = await requestWithFallback(rawSnippet || "Low-information output");
+        recipeRaw = extractAssistantContent(recipeResponse);
+      }
+      const recipeReply = !isLowInformationReply(recipeRaw)
+        ? recipeRaw
+        : "I could not generate recipe suggestions right now. Try again in a few seconds.";
+      return res.json({ reply: recipeReply, refresh_pantry: false });
+    }
+
     let response = await requestAiPlanWithFallback({
       message,
       history,
@@ -669,6 +822,85 @@ app.post("/api/ai/chat", requireAuth, async (req, res, next) => {
         : "I understood your message, but I need more detail. Try a specific pantry request like 'add eggs, milk' or 'list pantry'.";
 
     return res.json({ reply: finalReply, refresh_pantry: false });
+  } catch (err) {
+    if (err && (err.code === "insufficient_quota" || err.status === 429)) {
+      return res.status(429).json({
+        error:
+          "OpenRouter quota/rate limit exceeded. Check OpenRouter credits, limits, and model availability.",
+      });
+    }
+    if (err && err.status === 401) {
+      return res.status(401).json({ error: "OpenRouter authentication failed. Check OPENROUTER_API_KEY." });
+    }
+    if (err && err.status === 403) {
+      return res.status(403).json({ error: "OpenRouter access denied for this model or account." });
+    }
+    if (err && (err.status === 502 || err.status === 503 || err.status === 504)) {
+      return res.status(503).json({
+        error:
+          "AI provider is temporarily unavailable. Retry in a few seconds, or set OPENROUTER_FALLBACK_MODEL in .env.",
+      });
+    }
+    return next(err);
+  }
+});
+
+app.post("/api/ai/recipes", requireAuth, async (req, res, next) => {
+  try {
+    if (!openai) return res.status(500).json({ error: "OPENROUTER_API_KEY is not set" });
+    const message = String(req.body?.message || "").trim();
+    const count = req.body?.count == null ? extractRequestedRecipeCount(message, 5) : Number(req.body.count);
+    if (Number.isNaN(count) || count < 1 || count > 10) {
+      return badRequest(res, "count must be between 1 and 10");
+    }
+
+    const pantrySnapshot = await all(
+      "SELECT name, quantity, unit, category, expires_at FROM pantry_items WHERE user_id = ? ORDER BY updated_at ASC, id ASC",
+      [req.user.id]
+    );
+
+    const requestWithFallback = async (recoveryHint = "") => {
+      try {
+        return await requestAiRecipeSuggestions({
+          selectedModel: model,
+          pantrySnapshot,
+          userPreferences: req.user.preferences,
+          userPrompt: message,
+          count,
+          recoveryHint,
+        });
+      } catch (primaryErr) {
+        const isProviderUnavailable =
+          primaryErr?.status === 502 ||
+          primaryErr?.status === 503 ||
+          primaryErr?.status === 504 ||
+          /provider returned error/i.test(String(primaryErr?.message || ""));
+        const canFallback = Boolean(fallbackModel && fallbackModel !== model);
+        if (!(isProviderUnavailable && canFallback)) throw primaryErr;
+        return requestAiRecipeSuggestions({
+          selectedModel: fallbackModel,
+          pantrySnapshot,
+          userPreferences: req.user.preferences,
+          userPrompt: message,
+          count,
+          recoveryHint,
+        });
+      }
+    };
+
+    let response = await requestWithFallback();
+    let raw = extractAssistantContent(response);
+    if (isLowInformationReply(raw)) {
+      const rawSnippet = String(raw || "").replace(/\s+/g, " ").trim().slice(0, 160);
+      response = await requestWithFallback(rawSnippet || "Low-information output");
+      raw = extractAssistantContent(response);
+    }
+
+    const reply = !isLowInformationReply(raw)
+      ? raw
+      : "I could not generate recipe suggestions right now. Try again in a few seconds.";
+
+    return res.json({ reply, refresh_pantry: false });
   } catch (err) {
     if (err && (err.code === "insufficient_quota" || err.status === 429)) {
       return res.status(429).json({

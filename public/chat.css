@@ -227,6 +227,15 @@ body {
   margin-top: 8px;
 }
 
+.msg .recipe-title {
+  margin: 14px 0 4px;
+  font-weight: 700;
+}
+
+.msg .recipe-title:first-child {
+  margin-top: 0;
+}
+
 .msg ol,
 .msg ul {
   margin: 6px 0 0 1.2rem;
@@ -341,6 +350,18 @@ button {
   font-size: 0.88rem;
   line-height: 1.2;
   text-transform: capitalize;
+}
+
+.pantry-item-name--editable {
+  cursor: text;
+  border-bottom: 1px dashed #8fb39d;
+  padding-bottom: 1px;
+}
+
+.pantry-item-name--editable:focus {
+  outline: 2px solid #9fcbb1;
+  outline-offset: 2px;
+  border-bottom-color: transparent;
 }
 
 .pantry-item p {
@@ -481,10 +502,25 @@ button {
   width: 100%;
 }
 
+.auth-modal-form textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 96px;
+  font-family: "Roboto Mono", monospace;
+  font-size: 0.86rem;
+  padding: 8px;
+}
+
 .auth-modal-form button {
   background: var(--accent);
   color: #fff;
   border-color: var(--accent);
+}
+
+.prefs-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
 }
 
 .auth-feedback {

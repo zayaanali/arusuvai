@@ -79,6 +79,7 @@ npm run dev
 - `POST /api/recipes`
 - `DELETE /api/recipes/:id`
 - `POST /api/ai/chat` (AI integration point)
+- `POST /api/ai/recipes` (fast pantry-aware recipe suggestions)
 
 ## Users, Pantry Isolation, and Global Items
 

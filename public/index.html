@@ -22,7 +22,7 @@
         <p>pantry manager</p>
       </div>
       <nav>
-        <a href="/manual">Manual</a>
+        <button id="prefs-btn" type="button" class="nav-btn">Preferences</button>
         <a href="/api/health" target="_blank" rel="noreferrer">Health</a>
         <button id="login-btn" type="button" class="nav-btn">Login</button>
         <button id="register-btn" type="button" class="nav-btn">Register</button>
@@ -156,6 +156,31 @@
             <button type="submit">Register</button>
           </form>
           <p id="register-feedback" class="auth-feedback" aria-live="polite"></p>
+        </div>
+      </section>
+    </div>
+
+    <div id="prefs-modal" class="modal hidden" aria-hidden="true" role="dialog" aria-labelledby="prefs-title">
+      <div id="prefs-backdrop" class="modal-backdrop"></div>
+      <section class="modal-card auth-modal-card">
+        <div class="modal-head">
+          <h2 id="prefs-title">Preferences</h2>
+          <button id="prefs-close" type="button" class="ghost">Close</button>
+        </div>
+        <div class="modal-body">
+          <form id="prefs-form" class="auth-modal-form">
+            <textarea
+              id="prefs-input"
+              name="preferences"
+              rows="5"
+              placeholder="Example: Prefer South Indian vegetarian meals; low oil; high protein dinners."
+            ></textarea>
+            <div class="prefs-actions">
+              <button type="submit">Save</button>
+              <button id="prefs-clear" type="button" class="ghost">Clear</button>
+            </div>
+          </form>
+          <p id="prefs-feedback" class="auth-feedback" aria-live="polite"></p>
         </div>
       </section>
     </div>

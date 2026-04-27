@@ -5,6 +5,7 @@ const pantryList = document.getElementById("pantry-list");
 const pantryMeta = document.getElementById("pantry-meta");
 const statusEl = document.getElementById("api-status");
 const useAiToggle = document.getElementById("use-ai-toggle");
+const prefsBtn = document.getElementById("prefs-btn");
 const helpBtn = document.getElementById("help-btn");
 const helpModal = document.getElementById("help-modal");
 const helpBackdrop = document.getElementById("help-backdrop");
@@ -21,6 +22,13 @@ const loginCloseBtn = document.getElementById("login-close");
 const registerModal = document.getElementById("register-modal");
 const registerBackdrop = document.getElementById("register-backdrop");
 const registerCloseBtn = document.getElementById("register-close");
+const prefsModal = document.getElementById("prefs-modal");
+const prefsBackdrop = document.getElementById("prefs-backdrop");
+const prefsCloseBtn = document.getElementById("prefs-close");
+const prefsForm = document.getElementById("prefs-form");
+const prefsInput = document.getElementById("prefs-input");
+const prefsClearBtn = document.getElementById("prefs-clear");
+const prefsFeedbackEl = document.getElementById("prefs-feedback");
 const authStateEl = document.getElementById("auth-state");
 const loginForm = document.getElementById("login-form");
 const registerForm = document.getElementById("register-form");
@@ -152,12 +160,8 @@ function renderBotMessageHtml(text) {
     }
 
     if (/^\d+\.\s+/.test(line)) {
-      const items = [];
-      while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) {
-        items.push(lines[i].replace(/^\s*\d+\.\s+/, "").trim());
-        i += 1;
-      }
-      chunks.push(`<ol>${items.map((item) => `<li>${formatInlineMarkdown(item)}</li>`).join("")}</ol>`);
+      chunks.push(`<p class="recipe-title">${formatInlineMarkdown(line.replace(/^\d+\.\s+/, ""))}</p>`);
+      i += 1;
       continue;
     }
 
@@ -414,7 +418,7 @@ function renderPantry(items) {
       card.innerHTML = `
         <div class="pantry-item-row">
           <div class="pantry-item-main">
-            <h4>${displayName(item)}</h4>
+            <h4 class="pantry-item-name">${escapeHtml(displayName(item))}</h4>
             <p><strong>${item.quantity}</strong> ${item.unit || "unit"} • ${expiryLine}</p>
           </div>
         </div>
@@ -437,6 +441,21 @@ function renderPantry(items) {
       card.querySelector(".pantry-item-row")?.appendChild(actions);
 
       if (isEditing) {
+        const nameEl = card.querySelector(".pantry-item-name");
+        if (nameEl) {
+          nameEl.setAttribute("contenteditable", "true");
+          nameEl.setAttribute("spellcheck", "false");
+          nameEl.setAttribute("tabindex", "0");
+          nameEl.classList.add("pantry-item-name--editable");
+          nameEl.setAttribute("title", "Click to rename");
+          nameEl.addEventListener("keydown", (event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              nameEl.blur();
+            }
+          });
+        }
+
         const form = document.createElement("form");
         form.className = "pantry-edit-form";
         form.innerHTML = `
@@ -460,11 +479,16 @@ function renderPantry(items) {
 
         form.addEventListener("submit", async (event) => {
           event.preventDefault();
+          const updatedName = normalizeName(String(nameEl?.textContent || ""));
           const categoryInput = String(form.elements.category?.value || "");
           const unitInput = String(form.elements.unit?.value || "");
           const expiryInput = String(form.elements.expires_at?.value || "").trim();
           const category = normalizeName(categoryInput) || "uncategorized";
           const unit = normalizeName(unitInput) || "unit";
+          if (!updatedName) {
+            addMessage("bot", "Name cannot be empty.");
+            return;
+          }
           if (expiryInput && !isValidDateInput(expiryInput)) {
             addMessage("bot", "Date must be YYYY-MM-DD.");
             return;
@@ -478,6 +502,7 @@ function renderPantry(items) {
             await api(`/pantry/${item.id}`, {
               method: "PATCH",
               body: JSON.stringify({
+                name: updatedName,
                 category,
                 unit,
                 expires_at: expiryInput || null,
@@ -485,7 +510,10 @@ function renderPantry(items) {
             });
             editingPantryItemId = null;
             await refreshPantry();
-            addMessage("bot", `Updated ${displayName(item)}: category=${category}, unit=${unit}, expiry=${expiryInput || "none"}.`);
+            addMessage(
+              "bot",
+              `Updated ${displayName(item)}${updatedName !== normalizeName(displayName(item)) ? ` -> ${updatedName}` : ""}: category=${category}, unit=${unit}, expiry=${expiryInput || "none"}.`
+            );
           } catch (err) {
             addMessage("bot", `Failed to update ${displayName(item)}: ${err.message}`);
             buttons.forEach((btn) => {
@@ -963,13 +991,15 @@ chatForm.addEventListener("submit", async (e) => {
 });
 
 document.getElementById("what-can-i-make")?.addEventListener("click", async () => {
-  const prompt =
-    "Using my pantry snapshot, suggest exactly 5 recipes I can make now. For each recipe, include: name, pantry items used, and brief steps. Prefer recipes that maximize pantry usage.";
   try {
     ensureSignedIn();
     addMessage("user", "What can I make?");
-    userMessageHistory.push(prompt);
-    await runAiMode(prompt);
+    const data = await api("/ai/recipes", {
+      method: "POST",
+      body: JSON.stringify({ count: 5 }),
+    });
+    const reply = String(data?.reply || "").trim();
+    addMessage("bot", reply || "Could not generate suggestions right now.");
   } catch (err) {
     addMessage("bot", `Error: ${err.message}`);
   }
@@ -1081,6 +1111,22 @@ function closeRegisterModal() {
   registerModal.setAttribute("aria-hidden", "true");
 }
 
+function openPrefsModal() {
+  if (!authUser) {
+    addMessage("bot", "Please login first.");
+    return;
+  }
+  setAuthFeedback(prefsFeedbackEl, "");
+  if (prefsInput) prefsInput.value = String(authUser.preferences || "");
+  prefsModal.classList.remove("hidden");
+  prefsModal.setAttribute("aria-hidden", "false");
+}
+
+function closePrefsModal() {
+  prefsModal.classList.add("hidden");
+  prefsModal.setAttribute("aria-hidden", "true");
+}
+
 helpBtn.addEventListener("click", openHelpModal);
 helpCloseBtn.addEventListener("click", closeHelpModal);
 helpBackdrop.addEventListener("click", closeHelpModal);
@@ -1093,6 +1139,39 @@ loginBackdrop?.addEventListener("click", closeLoginModal);
 registerBtn?.addEventListener("click", openRegisterModal);
 registerCloseBtn?.addEventListener("click", closeRegisterModal);
 registerBackdrop?.addEventListener("click", closeRegisterModal);
+prefsBtn?.addEventListener("click", openPrefsModal);
+prefsCloseBtn?.addEventListener("click", closePrefsModal);
+prefsBackdrop?.addEventListener("click", closePrefsModal);
+prefsForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  setAuthFeedback(prefsFeedbackEl, "");
+  try {
+    ensureSignedIn();
+    const data = await api("/auth/preferences", {
+      method: "PATCH",
+      body: JSON.stringify({ preferences: String(prefsInput?.value || "") }),
+    });
+    setAuth(authToken, data.user);
+    setAuthFeedback(prefsFeedbackEl, "Preferences saved.", "success");
+  } catch (err) {
+    setAuthFeedback(prefsFeedbackEl, `Save failed: ${err.message}`, "error");
+  }
+});
+prefsClearBtn?.addEventListener("click", async () => {
+  setAuthFeedback(prefsFeedbackEl, "");
+  try {
+    ensureSignedIn();
+    const data = await api("/auth/preferences", {
+      method: "PATCH",
+      body: JSON.stringify({ preferences: "" }),
+    });
+    setAuth(authToken, data.user);
+    if (prefsInput) prefsInput.value = "";
+    setAuthFeedback(prefsFeedbackEl, "Preferences cleared.", "success");
+  } catch (err) {
+    setAuthFeedback(prefsFeedbackEl, `Clear failed: ${err.message}`, "error");
+  }
+});
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && !helpModal.classList.contains("hidden")) {
     closeHelpModal();
@@ -1105,6 +1184,9 @@ document.addEventListener("keydown", (event) => {
   }
   if (event.key === "Escape" && !registerModal.classList.contains("hidden")) {
     closeRegisterModal();
+  }
+  if (event.key === "Escape" && !prefsModal.classList.contains("hidden")) {
+    closePrefsModal();
   }
 });
 
