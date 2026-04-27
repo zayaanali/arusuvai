@@ -189,6 +189,15 @@ body {
   overflow-y: auto;
 }
 
+.assistant-actions {
+  padding: 0 14px 10px;
+}
+
+.assistant-actions .ghost {
+  padding: 7px 10px;
+  font-size: 0.82rem;
+}
+
 .msg {
   max-width: 85%;
   border-radius: 12px;
@@ -235,28 +244,12 @@ body {
   padding: 0 4px;
 }
 
-.quick-row {
-  display: flex;
-  gap: 8px;
-  padding: 0 14px 10px;
-  flex-wrap: wrap;
-}
-
-.quick-btn,
 button {
   border: 1px solid var(--line);
   border-radius: 10px;
   background: #f2faf5;
   color: var(--ink);
   cursor: pointer;
-}
-
-.quick-btn {
-  padding: 7px 10px;
-  font-size: 0.82rem;
-  white-space: normal;
-  overflow-wrap: anywhere;
-  max-width: 100%;
 }
 
 .chat-form {

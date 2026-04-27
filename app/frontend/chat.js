@@ -109,6 +109,17 @@ Shopping List
 - shopping list
   Shows current shopping list.
 
+Profile Preferences
+- prefs get
+  Shows your current AI preference text.
+
+- prefs set <text>
+  Example: prefs set Prefer South Indian vegetarian dinners; low oil.
+  Saves soft AI guidance for your account.
+
+- prefs clear
+  Clears your saved AI preference text.
+
 Support
 - help
   Shows this guide.`;
@@ -508,6 +519,46 @@ async function refreshPantry() {
 
 async function runManualCommand(message) {
   const trimmed = message.trim();
+  const prefsMatch = trimmed.match(/^(prefs|preferences)\s+(get|set|clear)\b\s*(.*)$/i);
+  if (prefsMatch) {
+    const action = prefsMatch[2].toLowerCase();
+    const tail = prefsMatch[3] ? prefsMatch[3].trim() : "";
+
+    if (action === "get") {
+      const current = String(authUser?.preferences || "").trim();
+      if (!current) {
+        addMessage("bot", "No preferences set. Use: prefs set <text>");
+      } else {
+        addMessage("bot", `Current preferences:\n${current}`);
+      }
+      return;
+    }
+
+    if (action === "set") {
+      if (!tail) {
+        addMessage("bot", "Format: prefs set <text>");
+        return;
+      }
+      const data = await api("/auth/preferences", {
+        method: "PATCH",
+        body: JSON.stringify({ preferences: tail }),
+      });
+      setAuth(authToken, data.user);
+      addMessage("bot", "Preferences updated.");
+      return;
+    }
+
+    if (action === "clear") {
+      const data = await api("/auth/preferences", {
+        method: "PATCH",
+        body: JSON.stringify({ preferences: "" }),
+      });
+      setAuth(authToken, data.user);
+      addMessage("bot", "Preferences cleared.");
+      return;
+    }
+  }
+
   const shoppingMatch = trimmed.match(/^shopping\s+(add|rm|list)\b\s*(.*)$/i);
   if (shoppingMatch) {
     const action = shoppingMatch[1].toLowerCase();
@@ -911,15 +962,17 @@ chatForm.addEventListener("submit", async (e) => {
   }
 });
 
-document.querySelectorAll(".quick-btn").forEach((btn) => {
-  btn.addEventListener("click", async () => {
-    const prompt = btn.dataset.prompt || "";
-    try {
-      await handleChat(prompt);
-    } catch (err) {
-      addMessage("bot", `Error: ${err.message}`);
-    }
-  });
+document.getElementById("what-can-i-make")?.addEventListener("click", async () => {
+  const prompt =
+    "Using my pantry snapshot, suggest exactly 5 recipes I can make now. For each recipe, include: name, pantry items used, and brief steps. Prefer recipes that maximize pantry usage.";
+  try {
+    ensureSignedIn();
+    addMessage("user", "What can I make?");
+    userMessageHistory.push(prompt);
+    await runAiMode(prompt);
+  } catch (err) {
+    addMessage("bot", `Error: ${err.message}`);
+  }
 });
 
 document.getElementById("refresh-pantry").addEventListener("click", async () => {

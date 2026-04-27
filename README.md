@@ -200,3 +200,19 @@ This will:
 - read `DB_PATH` from `/opt/pantry-manager/.env`
 - create a timestamped `.db` snapshot in `/opt/pantry-manager/backups`
 - remove backup files older than `14` days
+
+### Daily cron backup
+
+Install/update a daily crontab entry:
+
+```bash
+scripts/install_daily_backup_cron.sh
+```
+
+Default schedule is every day at `02:15` local server time.
+
+Custom schedule example (03:00 daily):
+
+```bash
+scripts/install_daily_backup_cron.sh 3 0
+```
