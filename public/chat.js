@@ -38,6 +38,7 @@ const logoutBtn = document.getElementById("logout-btn");
 const API_BASE_URL = "/api";
 const AUTH_TOKEN_KEY = "pantry_auth_token";
 const DEFAULT_MANUAL_MODE = false;
+const MAX_HISTORY_MESSAGES = 16;
 const userMessageHistory = [];
 let lastPantryItems = [];
 let editingPantryItemId = null;
@@ -139,6 +140,20 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+function addHistory(role, content) {
+  const text = String(content || "").trim();
+  if (!text) return;
+  const safeRole = role === "assistant" ? "assistant" : "user";
+  userMessageHistory.push({ role: safeRole, content: text });
+  if (userMessageHistory.length > MAX_HISTORY_MESSAGES) {
+    userMessageHistory.splice(0, userMessageHistory.length - MAX_HISTORY_MESSAGES);
+  }
+}
+
+function clearHistory() {
+  userMessageHistory.length = 0;
 }
 
 function formatInlineMarkdown(value) {
@@ -256,6 +271,7 @@ function clearAuth() {
   authToken = "";
   authUser = null;
   localStorage.removeItem(AUTH_TOKEN_KEY);
+  clearHistory();
   renderAuthState();
 }
 
@@ -956,12 +972,14 @@ async function runAiMode(message) {
   const compactReply = reply.toLowerCase().replace(/[.!?]/g, "");
   const isTrivialReply =
     !compactReply || compactReply === "done" || compactReply === "ok" || compactReply === "okay";
+  const displayedReply = isTrivialReply
+    ? "AI backend returned a placeholder response. Try again, or turn on Manual mode and run a manual command."
+    : reply;
   addMessage(
     "bot",
-    isTrivialReply
-      ? "AI backend returned a placeholder response. Try again, or turn on Manual mode and run a manual command."
-      : reply
+    displayedReply
   );
+  addHistory("assistant", displayedReply);
   if (data.refresh_pantry) {
     await refreshPantry();
   }
@@ -970,11 +988,11 @@ async function runAiMode(message) {
 async function handleChat(message) {
   ensureSignedIn();
   addMessage("user", message);
-  userMessageHistory.push(message);
   if (useAiToggle.checked) {
     await runManualCommand(message);
     return;
   }
+  addHistory("user", message);
   await runAiMode(message);
 }
 
@@ -993,13 +1011,17 @@ chatForm.addEventListener("submit", async (e) => {
 document.getElementById("what-can-i-make")?.addEventListener("click", async () => {
   try {
     ensureSignedIn();
-    addMessage("user", "What can I make?");
+    const prompt = "What can I make?";
+    addMessage("user", prompt);
+    addHistory("user", prompt);
     const data = await api("/ai/recipes", {
       method: "POST",
-      body: JSON.stringify({ count: 5 }),
+      body: JSON.stringify({ message: prompt, count: 5, preference_strength: "strong" }),
     });
     const reply = String(data?.reply || "").trim();
-    addMessage("bot", reply || "Could not generate suggestions right now.");
+    const displayedReply = reply || "Could not generate suggestions right now.";
+    addMessage("bot", displayedReply);
+    addHistory("assistant", displayedReply);
   } catch (err) {
     addMessage("bot", `Error: ${err.message}`);
   }
@@ -1026,6 +1048,7 @@ loginForm?.addEventListener("submit", async (event) => {
         password: form.get("password"),
       }),
     });
+    clearHistory();
     setAuth(data.token, data.user);
     event.target.reset();
     await refreshPantry();
@@ -1047,6 +1070,7 @@ registerForm?.addEventListener("submit", async (event) => {
         password: form.get("password"),
       }),
     });
+    clearHistory();
     setAuth(data.token, data.user);
     event.target.reset();
     await refreshPantry();

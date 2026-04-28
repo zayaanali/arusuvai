@@ -172,6 +172,22 @@ function isLowInformationReply(raw) {
   return !compact || compact === "done" || compact === "ok" || compact === "okay";
 }
 
+function parseConfidence(raw) {
+  const value = Number(raw);
+  if (Number.isNaN(value)) return 0;
+  return Math.min(Math.max(value, 0), 1);
+}
+
+function shouldExecuteAction(mode, intent, confidence) {
+  if (mode !== "action") return false;
+  const safeIntent = String(intent || "").trim().toLowerCase();
+  const mutateIntents = new Set(["add_pantry", "remove_pantry", "clear_pantry"]);
+  const readIntents = new Set(["list_pantry"]);
+  if (mutateIntents.has(safeIntent)) return confidence >= 0.8;
+  if (readIntents.has(safeIntent)) return confidence >= 0.65;
+  return false;
+}
+
 function hashPassword(password) {
   const salt = crypto.randomBytes(16).toString("hex");
   const derived = crypto.scryptSync(password, salt, 64).toString("hex");
@@ -286,14 +302,20 @@ async function requestAiPlan({ message, selectedModel, history, pantrySnapshot, 
         content: [
           "You are Pantry Manager AI orchestrator.",
           "Interpret user text and return JSON only.",
+          "Default to natural conversation unless a concrete pantry action is clearly required.",
           "Schema:",
           "{",
+          '  "mode": "chat|action",',
           '  "intent": "add_pantry|remove_pantry|list_pantry|clear_pantry|reply",',
+          '  "confidence": number,',
           '  "items": [{"name":"string","quantity":number|null,"unit":"string|null","category":"string|null","expires_at":"YYYY-MM-DD|null"}],',
           '  "names": ["string"],',
           '  "reply": "string"',
           "}",
           "Rules:",
+          "- mode=chat for normal Q&A, planning, recipe suggestions, explanations, and ambiguous requests.",
+          "- mode=action only when user intent to perform pantry operation is clear and specific.",
+          "- confidence is your certainty from 0.0 to 1.0.",
           "- If user asks to add pantry items, use intent=add_pantry with items.",
           "- If user asks to remove/delete pantry items, use intent=remove_pantry with names.",
           "- If user asks to list/show pantry, use intent=list_pantry.",
@@ -346,49 +368,6 @@ function parseCsvList(raw) {
     .split(",")
     .map((x) => normalizeName(x))
     .filter(Boolean);
-}
-
-function isRecipeRecommendationMessage(rawMessage) {
-  const message = String(rawMessage || "").trim().toLowerCase();
-  if (!message) return false;
-
-  const pantryActionPrefixes = [
-    "add ",
-    "rm ",
-    "remove ",
-    "delete ",
-    "list",
-    "clear",
-    "drop_table",
-    "set ",
-    "use ",
-    "discard ",
-    "inc ",
-    "dec ",
-    "rename ",
-    "category ",
-    "expiry ",
-    "find ",
-    "expiring ",
-    "shopping ",
-  ];
-  if (pantryActionPrefixes.some((prefix) => message.startsWith(prefix))) return false;
-
-  const recipeSignals = [
-    "recipe",
-    "recipes",
-    "meal",
-    "meals",
-    "what can i make",
-    "what should i cook",
-    "what can i cook",
-    "cook with",
-    "make with",
-    "dinner idea",
-    "lunch idea",
-    "breakfast idea",
-  ];
-  return recipeSignals.some((signal) => message.includes(signal));
 }
 
 function extractRequestedRecipeCount(rawMessage, fallback = 5) {
@@ -527,10 +506,12 @@ async function requestAiRecipeSuggestions({
   userPreferences = "",
   userPrompt = "",
   count = 5,
+  preferenceStrength = "soft",
   recoveryHint = "",
 }) {
   const safeCount = Math.min(Math.max(Number(count) || 5, 1), 10);
   const safePreferences = sanitizeUserPreferences(userPreferences);
+  const strongPreferenceMode = String(preferenceStrength || "").toLowerCase() === "strong";
 
   return openai.chat.completions.create({
     model: selectedModel,
@@ -546,7 +527,9 @@ async function requestAiRecipeSuggestions({
           "For each recipe include: name, pantry items used, and short steps.",
           "If a recipe needs 1-2 missing ingredients, mention them briefly as optional add-ons.",
           "Keep response concise and practical.",
-          "Use user preferences as LOW-to-MEDIUM influence only.",
+          strongPreferenceMode
+            ? "Treat user preferences as HIGH influence for recipe style and filtering while still using pantry reality."
+            : "Use user preferences as LOW-to-MEDIUM influence only.",
           "Do not ignore pantry data or user's direct request.",
         ].join("\n"),
       },
@@ -682,50 +665,6 @@ app.post("/api/ai/chat", requireAuth, async (req, res, next) => {
       [req.user.id]
     );
 
-    if (isRecipeRecommendationMessage(message)) {
-      const count = extractRequestedRecipeCount(message, 5);
-      const requestWithFallback = async (recoveryHint = "") => {
-        try {
-          return await requestAiRecipeSuggestions({
-            selectedModel: model,
-            pantrySnapshot,
-            userPreferences: req.user.preferences,
-            userPrompt: message,
-            count,
-            recoveryHint,
-          });
-        } catch (primaryErr) {
-          const isProviderUnavailable =
-            primaryErr?.status === 502 ||
-            primaryErr?.status === 503 ||
-            primaryErr?.status === 504 ||
-            /provider returned error/i.test(String(primaryErr?.message || ""));
-          const canFallback = Boolean(fallbackModel && fallbackModel !== model);
-          if (!(isProviderUnavailable && canFallback)) throw primaryErr;
-          return requestAiRecipeSuggestions({
-            selectedModel: fallbackModel,
-            pantrySnapshot,
-            userPreferences: req.user.preferences,
-            userPrompt: message,
-            count,
-            recoveryHint,
-          });
-        }
-      };
-
-      let recipeResponse = await requestWithFallback();
-      let recipeRaw = extractAssistantContent(recipeResponse);
-      if (isLowInformationReply(recipeRaw)) {
-        const rawSnippet = String(recipeRaw || "").replace(/\s+/g, " ").trim().slice(0, 160);
-        recipeResponse = await requestWithFallback(rawSnippet || "Low-information output");
-        recipeRaw = extractAssistantContent(recipeResponse);
-      }
-      const recipeReply = !isLowInformationReply(recipeRaw)
-        ? recipeRaw
-        : "I could not generate recipe suggestions right now. Try again in a few seconds.";
-      return res.json({ reply: recipeReply, refresh_pantry: false });
-    }
-
     let response = await requestAiPlanWithFallback({
       message,
       history,
@@ -734,7 +673,9 @@ app.post("/api/ai/chat", requireAuth, async (req, res, next) => {
     });
     let raw = extractAssistantContent(response);
     let parsed = tryParseAssistantJson(raw) || {};
+    let mode = String(parsed?.mode || "chat").trim().toLowerCase();
     let intent = String(parsed?.intent || "reply").trim().toLowerCase();
+    let confidence = parseConfidence(parsed?.confidence);
     let replyText = String(parsed?.reply || "").trim();
 
     const needsRecoveryPass =
@@ -753,11 +694,13 @@ app.post("/api/ai/chat", requireAuth, async (req, res, next) => {
       });
       raw = extractAssistantContent(response);
       parsed = tryParseAssistantJson(raw) || {};
+      mode = String(parsed?.mode || "chat").trim().toLowerCase();
       intent = String(parsed?.intent || "reply").trim().toLowerCase();
+      confidence = parseConfidence(parsed?.confidence);
       replyText = String(parsed?.reply || "").trim();
     }
 
-    if (intent === "add_pantry") {
+    if (shouldExecuteAction(mode, intent, confidence) && intent === "add_pantry") {
       const items = Array.isArray(parsed?.items) ? parsed.items : [];
       if (!items.length) {
         return res.json({ reply: "I did not find items to add. Try: add eggs, milk.", refresh_pantry: false });
@@ -783,7 +726,7 @@ app.post("/api/ai/chat", requireAuth, async (req, res, next) => {
       });
     }
 
-    if (intent === "remove_pantry") {
+    if (shouldExecuteAction(mode, intent, confidence) && intent === "remove_pantry") {
       let names = Array.isArray(parsed?.names) ? parsed.names : [];
       if (!names.length && typeof message === "string") {
         const maybe = message.replace(/^rm\b|^remove\b|^delete\b/i, "").trim();
@@ -797,7 +740,7 @@ app.post("/api/ai/chat", requireAuth, async (req, res, next) => {
       });
     }
 
-    if (intent === "list_pantry") {
+    if (shouldExecuteAction(mode, intent, confidence) && intent === "list_pantry") {
       const rows = await all("SELECT * FROM pantry_items WHERE user_id = ? ORDER BY name", [req.user.id]);
       const names = rows.map((r) => r.name);
       return res.json({
@@ -806,7 +749,7 @@ app.post("/api/ai/chat", requireAuth, async (req, res, next) => {
       });
     }
 
-    if (intent === "clear_pantry") {
+    if (shouldExecuteAction(mode, intent, confidence) && intent === "clear_pantry") {
       const result = await run("DELETE FROM pantry_items WHERE user_id = ?", [req.user.id]);
       return res.json({
         reply: `Pantry cleared. Deleted ${Number(result?.changes || 0)} item(s).`,
@@ -815,11 +758,14 @@ app.post("/api/ai/chat", requireAuth, async (req, res, next) => {
     }
 
     const rawFallbackReply = !looksLikeJson(raw) ? raw.trim() : "";
+    const lowConfidenceAction = mode === "action" && !shouldExecuteAction(mode, intent, confidence);
     const finalReply = !isLowInformationReply(replyText)
       ? replyText
       : !isLowInformationReply(rawFallbackReply)
         ? rawFallbackReply
-        : "I understood your message, but I need more detail. Try a specific pantry request like 'add eggs, milk' or 'list pantry'.";
+        : lowConfidenceAction
+          ? "I might be misunderstanding. Do you want me to change your pantry, or just answer conversationally?"
+          : "I understood your message, but I need more detail. Try a specific pantry request like 'add eggs, milk' or 'list pantry'.";
 
     return res.json({ reply: finalReply, refresh_pantry: false });
   } catch (err) {
@@ -850,6 +796,7 @@ app.post("/api/ai/recipes", requireAuth, async (req, res, next) => {
     if (!openai) return res.status(500).json({ error: "OPENROUTER_API_KEY is not set" });
     const message = String(req.body?.message || "").trim();
     const count = req.body?.count == null ? extractRequestedRecipeCount(message, 5) : Number(req.body.count);
+    const preferenceStrength = String(req.body?.preference_strength || "soft").toLowerCase() === "strong" ? "strong" : "soft";
     if (Number.isNaN(count) || count < 1 || count > 10) {
       return badRequest(res, "count must be between 1 and 10");
     }
@@ -867,6 +814,7 @@ app.post("/api/ai/recipes", requireAuth, async (req, res, next) => {
           userPreferences: req.user.preferences,
           userPrompt: message,
           count,
+          preferenceStrength,
           recoveryHint,
         });
       } catch (primaryErr) {
@@ -883,6 +831,7 @@ app.post("/api/ai/recipes", requireAuth, async (req, res, next) => {
           userPreferences: req.user.preferences,
           userPrompt: message,
           count,
+          preferenceStrength,
           recoveryHint,
         });
       }
