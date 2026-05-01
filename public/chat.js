@@ -683,6 +683,10 @@ function clearAuth() {
 
 function renderAuthState() {
   if (!authStateEl) return;
+  if (prefsBtn) prefsBtn.style.display = authUser ? "" : "none";
+  if (loginBtn) loginBtn.style.display = authUser ? "none" : "";
+  if (registerBtn) registerBtn.style.display = authUser ? "none" : "";
+  if (logoutBtn) logoutBtn.style.display = authUser ? "" : "none";
   if (!authUser) {
     authStateEl.textContent = "Not signed in";
     return;
@@ -1311,7 +1315,8 @@ loginForm?.addEventListener("submit", async (event) => {
     setAuth(data.token, data.user);
     event.target.reset();
     await refreshPantry();
-    setAuthFeedback(loginFeedbackEl, `Welcome back, ${data.user.username}.`, "success");
+    closeLoginModal();
+    addMessage("bot", `Welcome back, ${data.user.username}.`);
   } catch (err) {
     setAuthFeedback(loginFeedbackEl, `Login failed: ${err.message}`, "error");
   }
@@ -1333,7 +1338,8 @@ registerForm?.addEventListener("submit", async (event) => {
     setAuth(data.token, data.user);
     event.target.reset();
     await refreshPantry();
-    setAuthFeedback(registerFeedbackEl, `Account created for ${data.user.username}.`, "success");
+    closeRegisterModal();
+    addMessage("bot", `Account created for ${data.user.username}.`);
   } catch (err) {
     setAuthFeedback(registerFeedbackEl, `Register failed: ${err.message}`, "error");
   }
