@@ -679,6 +679,7 @@ async function requestAiRecipeSuggestions({
   const safeCount = Math.min(Math.max(Number(count) || 5, 1), 10);
   const safePreferences = sanitizeUserPreferences(userPreferences);
   const strongPreferenceMode = String(preferenceStrength || "").toLowerCase() === "strong";
+  const requestedTopic = String(userPrompt || "").trim();
 
   return openai.chat.completions.create({
     model: selectedModel,
@@ -695,6 +696,9 @@ async function requestAiRecipeSuggestions({
           "- Name",
           "- Pantry Items",
           "- Missing Items",
+          "Prioritize the user's requested dish/topic/cuisine as the primary relevance signal.",
+          "Do not drift to unrelated dishes just because pantry overlap is high.",
+          "If exact matches are limited, prefer closely related variants and keep them clearly connected to the user's request.",
           "Missing Items should include only ingredients not currently in pantry and required to make the recipe.",
           "Do not include steps, instructions, tips, optional add-ons, or extra commentary.",
           "Keep response concise and practical.",
@@ -728,7 +732,7 @@ async function requestAiRecipeSuggestions({
         : []),
       {
         role: "user",
-        content: String(userPrompt || "").trim() || "What can I make?",
+        content: requestedTopic || "What can I make?",
       },
     ],
   });
