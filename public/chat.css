@@ -125,7 +125,7 @@ body {
   margin: 0 auto;
   padding: 12px 18px 24px;
   display: grid;
-  grid-template-columns: 1.2fr 0.8fr;
+  grid-template-columns: 1fr 1fr;
   gap: 14px;
 }
 
@@ -142,6 +142,14 @@ body {
   height: min(72vh, 760px);
   max-height: 760px;
   overflow: hidden;
+}
+
+.right-column {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 14px;
+  height: min(72vh, 760px);
+  max-height: 760px;
 }
 
 .panel-head {
@@ -231,12 +239,24 @@ body {
 }
 
 .msg .recipe-title {
-  margin: 14px 0 4px;
+  margin: 18px 0 6px;
   font-weight: 700;
+  padding-top: 8px;
+  border-top: 1px dashed #cfe1d6;
 }
 
 .msg .recipe-title:first-child {
   margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+
+.msg .recipe-pantry {
+  margin: 0;
+}
+
+.msg .recipe-missing {
+  margin-top: 10px;
 }
 
 .msg ol,
@@ -284,7 +304,17 @@ button {
 }
 
 .pantry-panel {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
   padding-bottom: 10px;
+  min-height: 0;
+}
+
+.queue-panel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  padding-bottom: 10px;
+  min-height: 0;
 }
 
 .ghost {
@@ -302,7 +332,7 @@ button {
   padding: 0 10px 10px;
   display: grid;
   gap: 10px;
-  max-height: 64vh;
+  max-height: none;
   overflow-y: auto;
 }
 
@@ -526,6 +556,60 @@ button {
   justify-content: flex-end;
 }
 
+.queue-list {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.queue-item {
+  border: 1px solid #d4e7da;
+  background: #f5fbf7;
+  border-radius: 10px;
+  padding: 8px;
+}
+
+.queue-item h4 {
+  margin: 0 0 4px;
+  font-size: 0.92rem;
+}
+
+.queue-item p {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+  white-space: pre-wrap;
+}
+
+.queue-item .prefs-actions {
+  margin-top: 8px;
+}
+
+.msg-actions {
+  margin-top: 6px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.recipe-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.recipe-title-row .recipe-title {
+  flex: 1;
+  margin: 0;
+}
+
+.recipe-inline-queue-btn {
+  white-space: nowrap;
+}
+
 .auth-feedback {
   margin: 10px 0 0;
   min-height: 1.2em;
@@ -577,6 +661,12 @@ button {
   .chat-panel {
     height: min(60vh, 620px);
     max-height: 620px;
+  }
+
+  .right-column {
+    height: auto;
+    max-height: none;
+    grid-template-rows: auto auto;
   }
 
   .pantry-list {

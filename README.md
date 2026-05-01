@@ -80,6 +80,10 @@ npm run dev
 - `DELETE /api/recipes/:id`
 - `POST /api/ai/chat` (AI integration point)
 - `POST /api/ai/recipes` (fast pantry-aware recipe suggestions)
+- `GET /api/recipe-queue` (Bearer token required)
+- `POST /api/recipe-queue/bulk` (Bearer token required)
+- `DELETE /api/recipe-queue/:id` (Bearer token required)
+- `DELETE /api/recipe-queue` (Bearer token required)
 
 ## Users, Pantry Isolation, and Global Items
 

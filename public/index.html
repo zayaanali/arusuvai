@@ -23,6 +23,7 @@
       </div>
       <nav>
         <button id="prefs-btn" type="button" class="nav-btn">Preferences</button>
+        <button id="queue-btn" type="button" class="nav-btn">Queued Recipes</button>
         <a href="/api/health" target="_blank" rel="noreferrer">Health</a>
         <button id="login-btn" type="button" class="nav-btn">Login</button>
         <button id="register-btn" type="button" class="nav-btn">Register</button>
@@ -66,14 +67,27 @@
         </form>
       </section>
 
-      <aside class="panel pantry-panel">
-        <div class="panel-head">
-          <h2>Pantry</h2>
-          <button id="refresh-pantry" class="ghost">Refresh</button>
-        </div>
+      <aside class="right-column">
+        <section class="panel pantry-panel">
+          <div class="panel-head">
+            <h2>Pantry</h2>
+            <button id="refresh-pantry" class="ghost">Refresh</button>
+          </div>
 
-        <div class="meta" id="pantry-meta">Loading pantry...</div>
-        <div id="pantry-list" class="pantry-list"></div>
+          <div class="meta" id="pantry-meta">Loading pantry...</div>
+          <div id="pantry-list" class="pantry-list"></div>
+        </section>
+
+        <section id="queue-panel" class="panel queue-panel">
+          <div class="panel-head">
+            <h2>Queued Recipes</h2>
+            <div class="prefs-actions">
+              <button id="queue-refresh" type="button">Refresh</button>
+              <button id="queue-clear" type="button" class="ghost">Clear All</button>
+            </div>
+          </div>
+          <div id="queue-list" class="queue-list"></div>
+        </section>
       </aside>
     </main>
 

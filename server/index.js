@@ -667,7 +667,7 @@ async function requestAiRecipeSuggestions({
 
   return openai.chat.completions.create({
     model: selectedModel,
-    max_tokens: 500,
+    max_tokens: 550,
     temperature: 0.5,
     messages: [
       {
@@ -676,9 +676,15 @@ async function requestAiRecipeSuggestions({
           "You are a fast pantry recipe assistant.",
           `Suggest exactly ${safeCount} recipes the user can make from pantry items.`,
           "Output as a numbered markdown list.",
-          "For each recipe include: name, pantry items used, and short steps.",
-          "If a recipe needs 1-2 missing ingredients, mention them briefly as optional add-ons.",
+          "For each recipe include ONLY these fields:",
+          "- Name",
+          "- Pantry Items",
+          "- Missing Items",
+          "Missing Items should include only ingredients not currently in pantry and required to make the recipe.",
+          "Do not include steps, instructions, tips, optional add-ons, or extra commentary.",
           "Keep response concise and practical.",
+          "Each recipe must stay compact (2-4 short lines total).",
+          "Do not cut off mid-item. Ensure all listed recipes are complete.",
           strongPreferenceMode
             ? "Treat user preferences as HIGH influence for recipe style and filtering while still using pantry reality."
             : "Use user preferences as LOW-to-MEDIUM influence only.",
@@ -1048,6 +1054,67 @@ app.post("/api/ai/recipes", requireAuth, async (req, res, next) => {
       });
     }
     return next(err);
+  }
+});
+
+app.get("/api/recipe-queue", requireAuth, async (req, res, next) => {
+  try {
+    const rows = await all(
+      "SELECT id, title, notes, created_at FROM queued_recipes WHERE user_id = ? ORDER BY id DESC",
+      [req.user.id]
+    );
+    res.json(rows);
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post("/api/recipe-queue/bulk", requireAuth, async (req, res, next) => {
+  try {
+    const recipes = Array.isArray(req.body?.recipes) ? req.body.recipes : [];
+    if (!recipes.length) return badRequest(res, "recipes is required");
+    const now = new Date().toISOString();
+    const added = [];
+    for (const item of recipes.slice(0, 20)) {
+      const title = String(item?.title || "").trim();
+      const notes = String(item?.notes || "").trim();
+      if (!title) continue;
+      const result = await run(
+        "INSERT INTO queued_recipes (user_id, title, notes, created_at) VALUES (?, ?, ?, ?)",
+        [req.user.id, title.slice(0, 200), notes.slice(0, 4000), now]
+      );
+      added.push(result.id);
+    }
+    if (!added.length) return badRequest(res, "No valid recipes to queue");
+    const placeholders = added.map(() => "?").join(", ");
+    const rows = await all(
+      `SELECT id, title, notes, created_at FROM queued_recipes WHERE id IN (${placeholders}) ORDER BY id DESC`,
+      added
+    );
+    res.status(201).json({ added: rows.length, recipes: rows });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.delete("/api/recipe-queue/:id", requireAuth, async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (Number.isNaN(id)) return badRequest(res, "invalid id");
+    const result = await run("DELETE FROM queued_recipes WHERE id = ? AND user_id = ?", [id, req.user.id]);
+    if (!result.changes) return res.status(404).json({ error: "Queued recipe not found" });
+    res.json({ deleted: id });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.delete("/api/recipe-queue", requireAuth, async (req, res, next) => {
+  try {
+    const result = await run("DELETE FROM queued_recipes WHERE user_id = ?", [req.user.id]);
+    res.json({ deleted: Number(result?.changes || 0) });
+  } catch (err) {
+    next(err);
   }
 });
 

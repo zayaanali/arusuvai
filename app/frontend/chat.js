@@ -29,6 +29,14 @@ const prefsForm = document.getElementById("prefs-form");
 const prefsInput = document.getElementById("prefs-input");
 const prefsClearBtn = document.getElementById("prefs-clear");
 const prefsFeedbackEl = document.getElementById("prefs-feedback");
+const queueBtn = document.getElementById("queue-btn");
+const queuePanel = document.getElementById("queue-panel");
+const queueModal = document.getElementById("queue-modal");
+const queueBackdrop = document.getElementById("queue-backdrop");
+const queueCloseBtn = document.getElementById("queue-close");
+const queueRefreshBtn = document.getElementById("queue-refresh");
+const queueClearBtn = document.getElementById("queue-clear");
+const queueListEl = document.getElementById("queue-list");
 const authStateEl = document.getElementById("auth-state");
 const loginForm = document.getElementById("login-form");
 const registerForm = document.getElementById("register-form");
@@ -213,10 +221,79 @@ function renderBotMessageHtml(text) {
       paragraph.push(lines[i].trim());
       i += 1;
     }
-    chunks.push(`<p>${formatInlineMarkdown(paragraph.join(" "))}</p>`);
+    const textValue = paragraph.join(" ");
+    const isPantryLine = /^pantry items?\s*:/i.test(textValue);
+    const isMissingLine = /^missing items?\s*:/i.test(textValue);
+    const cls = isPantryLine ? "recipe-pantry" : isMissingLine ? "recipe-missing" : "";
+    chunks.push(`<p${cls ? ` class="${cls}"` : ""}>${formatInlineMarkdown(textValue)}</p>`);
   }
 
   return chunks.join("");
+}
+
+function extractQueuedRecipesFromText(text) {
+  const lines = String(text || "").replace(/\r\n/g, "\n").split("\n");
+  const recipes = [];
+  let current = null;
+  const isDetailPrefix = (value) => /^(pantry items?|missing items?|ingredients?|steps?)\s*:/i.test(value);
+  const normalizeTitle = (line) =>
+    line
+      .replace(/^#{1,6}\s+/, "")
+      .replace(/^\d+\.\s+/, "")
+      .replace(/^\*\*(.+?)\*\*$/, "$1")
+      .replace(/:$/, "")
+      .trim();
+  const isPossibleTitleLine = (line) => {
+    if (!line || line.length > 120) return false;
+    if (isDetailPrefix(line)) return false;
+    if (/^[-*]\s+/.test(line)) return false;
+    if (/^\d+\.\s+/.test(line)) return true;
+    if (/^#{1,6}\s+/.test(line)) return true;
+    if (/^\*\*.+\*\*$/.test(line)) return true;
+    return /^[A-Z][\w\s'()/-]{2,}$/.test(line);
+  };
+
+  const pushCurrent = () => {
+    if (!current) return;
+    const title = String(current.title || "").trim();
+    if (!title) return;
+    const notes = current.details.join("\n").trim();
+    recipes.push({ title, notes });
+  };
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const raw = lines[i];
+    const line = raw.trim();
+    if (!line) {
+      if (current) current.details.push("");
+      continue;
+    }
+
+    const titleCandidate = normalizeTitle(line);
+    const next = i + 1 < lines.length ? lines[i + 1].trim().toLowerCase() : "";
+    const looksLikeTitle =
+      isPossibleTitleLine(line) &&
+      (isDetailPrefix(next) || !next || /^[-*]\s+/.test(next));
+
+    if (looksLikeTitle) {
+      pushCurrent();
+      current = { title: titleCandidate, details: [] };
+      continue;
+    }
+
+    if (current) current.details.push(line);
+  }
+  pushCurrent();
+
+  const unique = [];
+  const seen = new Set();
+  for (const recipe of recipes) {
+    const key = recipe.title.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(recipe);
+  }
+  return unique.slice(0, 10);
 }
 
 function addMessage(role, text) {
@@ -224,11 +301,112 @@ function addMessage(role, text) {
   el.className = `msg ${role}`;
   if (role === "bot") {
     el.innerHTML = renderBotMessageHtml(text);
+    const recipeCandidates = extractQueuedRecipesFromText(text);
+    if (recipeCandidates.length) {
+      const buildQueueButton = (recipe) => {
+        const queueButton = document.createElement("button");
+        queueButton.type = "button";
+        queueButton.className = "ghost recipe-inline-queue-btn";
+        queueButton.textContent = "Add to queue";
+        queueButton.title = `Add "${recipe.title}" to queue`;
+        queueButton.addEventListener("click", async () => {
+          try {
+            ensureSignedIn();
+            queueButton.disabled = true;
+            await api("/recipe-queue/bulk", {
+              method: "POST",
+              body: JSON.stringify({ recipes: [recipe] }),
+            });
+            await refreshQueueList().catch(() => {});
+            addMessage("bot", `Queued: ${recipe.title}`);
+          } catch (err) {
+            addMessage("bot", `Failed to queue recipe: ${err.message}`);
+          } finally {
+            queueButton.disabled = false;
+          }
+        });
+        return queueButton;
+      };
+
+      const titleEls = Array.from(el.querySelectorAll(".recipe-title"));
+      const inlineCount = Math.min(titleEls.length, recipeCandidates.length);
+      for (let i = 0; i < inlineCount; i += 1) {
+        const row = document.createElement("div");
+        row.className = "recipe-title-row";
+        const titleEl = titleEls[i];
+        titleEl.parentNode.insertBefore(row, titleEl);
+        row.appendChild(titleEl);
+        row.appendChild(buildQueueButton(recipeCandidates[i]));
+      }
+
+      const actions = document.createElement("div");
+      actions.className = "msg-actions";
+      for (let i = inlineCount; i < recipeCandidates.length; i += 1) {
+        actions.appendChild(buildQueueButton(recipeCandidates[i]));
+      }
+
+      if (recipeCandidates.length > 1) {
+        const queueAllBtn = document.createElement("button");
+        queueAllBtn.type = "button";
+        queueAllBtn.className = "ghost";
+        queueAllBtn.textContent = "Add all to queue";
+        queueAllBtn.addEventListener("click", async () => {
+          try {
+            ensureSignedIn();
+            queueAllBtn.disabled = true;
+            const result = await api("/recipe-queue/bulk", {
+              method: "POST",
+              body: JSON.stringify({ recipes: recipeCandidates }),
+            });
+            await refreshQueueList().catch(() => {});
+            addMessage("bot", `Queued ${Number(result?.added || recipeCandidates.length)} recipe(s).`);
+          } catch (err) {
+            addMessage("bot", `Failed to queue recipes: ${err.message}`);
+          } finally {
+            queueAllBtn.disabled = false;
+          }
+        });
+        actions.appendChild(queueAllBtn);
+      }
+      if (actions.childElementCount) el.appendChild(actions);
+    }
   } else {
     el.textContent = text;
   }
   chatLog.appendChild(el);
   chatLog.scrollTop = chatLog.scrollHeight;
+}
+
+async function refreshQueueList() {
+  ensureSignedIn();
+  const rows = await api("/recipe-queue");
+  queueListEl.innerHTML = "";
+  if (!rows.length) {
+    const empty = document.createElement("p");
+    empty.textContent = "No queued recipes yet.";
+    queueListEl.appendChild(empty);
+    return;
+  }
+  for (const row of rows) {
+    const item = document.createElement("div");
+    item.className = "queue-item";
+    item.innerHTML = `
+      <h4>${escapeHtml(row.title)}</h4>
+      <p>${escapeHtml(row.notes || "")}</p>
+      <div class="prefs-actions">
+        <button type="button" class="ghost queue-remove" data-id="${row.id}">Remove</button>
+      </div>
+    `;
+    item.querySelector(".queue-remove")?.addEventListener("click", async () => {
+      try {
+        await api(`/recipe-queue/${row.id}`, { method: "DELETE" });
+        await refreshQueueList();
+      } catch (err) {
+        addMessage("bot", `Failed to remove queued recipe: ${err.message}`);
+      }
+    });
+    queueListEl.appendChild(item);
+  }
 }
 
 function apiUrl(path) {
@@ -1172,6 +1350,35 @@ function closePrefsModal() {
   prefsModal.setAttribute("aria-hidden", "true");
 }
 
+async function openQueueModal() {
+  if (!authUser) {
+    addMessage("bot", "Please login first.");
+    return;
+  }
+  if (!queueModal) {
+    queuePanel?.scrollIntoView({ behavior: "smooth", block: "start" });
+    try {
+      await refreshQueueList();
+    } catch (err) {
+      addMessage("bot", `Failed to load queued recipes: ${err.message}`);
+    }
+    return;
+  }
+  queueModal.classList.remove("hidden");
+  queueModal.setAttribute("aria-hidden", "false");
+  try {
+    await refreshQueueList();
+  } catch (err) {
+    addMessage("bot", `Failed to load queued recipes: ${err.message}`);
+  }
+}
+
+function closeQueueModal() {
+  if (!queueModal) return;
+  queueModal.classList.add("hidden");
+  queueModal.setAttribute("aria-hidden", "true");
+}
+
 helpBtn.addEventListener("click", openHelpModal);
 helpCloseBtn.addEventListener("click", closeHelpModal);
 helpBackdrop.addEventListener("click", closeHelpModal);
@@ -1187,6 +1394,26 @@ registerBackdrop?.addEventListener("click", closeRegisterModal);
 prefsBtn?.addEventListener("click", openPrefsModal);
 prefsCloseBtn?.addEventListener("click", closePrefsModal);
 prefsBackdrop?.addEventListener("click", closePrefsModal);
+queueBtn?.addEventListener("click", openQueueModal);
+queueCloseBtn?.addEventListener("click", closeQueueModal);
+queueBackdrop?.addEventListener("click", closeQueueModal);
+queueRefreshBtn?.addEventListener("click", async () => {
+  try {
+    await refreshQueueList();
+  } catch (err) {
+    addMessage("bot", `Failed to refresh queued recipes: ${err.message}`);
+  }
+});
+queueClearBtn?.addEventListener("click", async () => {
+  try {
+    ensureSignedIn();
+    await api("/recipe-queue", { method: "DELETE" });
+    await refreshQueueList();
+    addMessage("bot", "Queued recipes cleared.");
+  } catch (err) {
+    addMessage("bot", `Failed to clear queued recipes: ${err.message}`);
+  }
+});
 prefsForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
   setAuthFeedback(prefsFeedbackEl, "");
@@ -1233,6 +1460,9 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && !prefsModal.classList.contains("hidden")) {
     closePrefsModal();
   }
+  if (event.key === "Escape" && queueModal && !queueModal.classList.contains("hidden")) {
+    closeQueueModal();
+  }
 });
 
 useAiToggle.addEventListener("change", () => {
@@ -1258,6 +1488,7 @@ useAiToggle.addEventListener("change", () => {
         const me = await api("/auth/me");
         setAuth(storedToken, me.user);
         await refreshPantry();
+        await refreshQueueList();
       } catch (_err) {
         clearAuth();
         renderPantry([]);
