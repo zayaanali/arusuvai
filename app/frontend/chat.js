@@ -156,6 +156,19 @@ function clearHistory() {
   userMessageHistory.length = 0;
 }
 
+function clearConversationContext() {
+  clearHistory();
+  addMessage("bot", "Conversation context cleared.");
+}
+
+function isClearContextCommand(message) {
+  const normalized = String(message || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+  return normalized === "reset context" || normalized === "clear context" || normalized === "new topic";
+}
+
 function formatInlineMarkdown(value) {
   return escapeHtml(value)
     .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
@@ -988,6 +1001,10 @@ async function runAiMode(message) {
 async function handleChat(message) {
   ensureSignedIn();
   addMessage("user", message);
+  if (isClearContextCommand(message)) {
+    clearConversationContext();
+    return;
+  }
   if (useAiToggle.checked) {
     await runManualCommand(message);
     return;
@@ -1025,6 +1042,10 @@ document.getElementById("what-can-i-make")?.addEventListener("click", async () =
   } catch (err) {
     addMessage("bot", `Error: ${err.message}`);
   }
+});
+
+document.getElementById("clear-context")?.addEventListener("click", () => {
+  clearConversationContext();
 });
 
 document.getElementById("refresh-pantry").addEventListener("click", async () => {
