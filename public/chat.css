@@ -681,6 +681,17 @@ button {
   background: #f7fcf9;
   border-radius: 10px;
   padding: 9px;
+  text-align: left;
+  width: 100%;
+}
+
+.summary-card.pantry-summary-trigger {
+  cursor: pointer;
+}
+
+.summary-card.pantry-summary-trigger:hover {
+  border-color: #b8d4c4;
+  background: #f0f8f3;
 }
 
 .summary-card h4 {
@@ -695,6 +706,104 @@ button {
   margin: 8px 0 0;
   font-size: 1rem;
   font-weight: 700;
+}
+
+.pantry-modal-card {
+  width: min(1280px, calc(100vw - 16px));
+}
+
+.pantry-modal-list {
+  display: grid;
+  gap: 8px;
+}
+
+.pantry-modal-category {
+  border: 1px solid #d8e9de;
+  background: #f9fdfb;
+  border-radius: 10px;
+  padding: 6px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  align-items: start;
+}
+
+.pantry-modal-category-title {
+  margin: 0 0 6px;
+  padding: 5px 7px;
+  border-radius: 8px;
+  border: 1px solid #dcece2;
+  background: #f0f8f3;
+  font-size: 0.78rem;
+  color: #3f6753;
+  text-transform: capitalize;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  grid-column: 1 / -1;
+}
+
+.pantry-modal-item {
+  border: 1px solid #d4e7da;
+  background: #f5fbf7;
+  border-radius: 10px;
+  padding: 7px;
+}
+
+.pantry-modal-category .pantry-modal-item + .pantry-modal-item {
+  margin-top: 0;
+}
+
+.pantry-modal-item-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.pantry-modal-item h4 {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.pantry-modal-item p {
+  margin: 3px 0 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.pantry-modal-item-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.pantry-modal-edit-form {
+  margin-top: 8px;
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.pantry-modal-edit-form label {
+  display: grid;
+  gap: 3px;
+  font-size: 0.74rem;
+  color: var(--muted);
+}
+
+.pantry-modal-edit-form input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px;
+  font-size: 0.78rem;
+}
+
+.pantry-modal-edit-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
 }
 
 .recipe-modal-body {
@@ -762,6 +871,27 @@ button {
     height: auto;
     max-height: none;
     grid-template-rows: auto auto;
+  }
+
+  .pantry-modal-item-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .pantry-modal-item-actions {
+    justify-content: flex-start;
+  }
+
+  .pantry-modal-edit-form {
+    grid-template-columns: 1fr;
+  }
+
+  .pantry-modal-category {
+    grid-template-columns: 1fr;
+  }
+
+  .pantry-modal-list {
+    grid-template-columns: 1fr;
   }
 
   .pantry-list {

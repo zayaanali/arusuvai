@@ -29,6 +29,11 @@ const prefsForm = document.getElementById("prefs-form");
 const prefsInput = document.getElementById("prefs-input");
 const prefsClearBtn = document.getElementById("prefs-clear");
 const prefsFeedbackEl = document.getElementById("prefs-feedback");
+const pantryModal = document.getElementById("pantry-modal");
+const pantryModalBackdrop = document.getElementById("pantry-modal-backdrop");
+const pantryModalCloseBtn = document.getElementById("pantry-modal-close");
+const pantryModalMeta = document.getElementById("pantry-modal-meta");
+const pantryModalList = document.getElementById("pantry-modal-list");
 const queueBtn = document.getElementById("queue-btn");
 const queuePanel = document.getElementById("queue-panel");
 const queueModal = document.getElementById("queue-modal");
@@ -764,32 +769,7 @@ function isValidDateInput(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(new Date(`${value}T00:00:00`).getTime());
 }
 
-function startEditingPantryItem(itemId) {
-  editingPantryItemId = itemId;
-  renderPantry(lastPantryItems);
-}
-
-function stopEditingPantryItem() {
-  editingPantryItemId = null;
-  renderPantry(lastPantryItems);
-}
-
-function renderPantry(items) {
-  pantryList.innerHTML = "";
-
-  if (!items.length) {
-    pantryMeta.textContent = "No pantry items yet.";
-    pantryList.innerHTML = `
-      <div class="pantry-summary-grid">
-        <article class="summary-card"><h4>Total Items</h4><p>0</p></article>
-        <article class="summary-card"><h4>Expiring (7d)</h4><p>0</p></article>
-        <article class="summary-card"><h4>Expired</h4><p>0</p></article>
-        <article class="summary-card"><h4>Categories</h4><p>0</p></article>
-      </div>
-    `;
-    return;
-  }
-
+function getPantrySummary(items) {
   const expiringSoon = items.filter((item) => {
     const days = daysUntil(item.expires_at);
     return days !== null && days >= 0 && days <= 7;
@@ -801,16 +781,141 @@ function renderPantry(items) {
   const categories = new Set(
     items.map((item) => normalizeName(item?.category || "") || "uncategorized")
   );
+  return { expiringSoon, expired, categories: categories.size };
+}
 
-  pantryMeta.textContent = `Summary view (${items.length} item${items.length === 1 ? "" : "s"})`;
-  pantryList.innerHTML = `
+function getDisplayName(item) {
+  return item?.name || item?.canonical_name || item?.display_name || "unnamed item";
+}
+
+function formatExpiryLine(item) {
+  const days = daysUntil(item.expires_at);
+  if (!item.expires_at || days === null) return "No expiry";
+  if (days < 0) return `Expired ${Math.abs(days)}d ago`;
+  if (days <= 7) return `Expires in ${days}d`;
+  return `Expires in ${days}d`;
+}
+
+function stopEditingPantryItem() {
+  editingPantryItemId = null;
+}
+
+function renderPantryModalList(items) {
+  if (!pantryModalList || !pantryModalMeta) return;
+  pantryModalList.innerHTML = "";
+  if (!items.length) {
+    pantryModalMeta.textContent = "Pantry is empty.";
+    const empty = document.createElement("p");
+    empty.className = "meta";
+    empty.style.padding = "0";
+    empty.textContent = "Add items to start tracking pantry details.";
+    pantryModalList.appendChild(empty);
+    return;
+  }
+
+  const { expiringSoon, expired, categories } = getPantrySummary(items);
+  pantryModalMeta.textContent = `${items.length} items • ${categories} categories • ${expiringSoon} expiring soon • ${expired} expired`;
+
+  const sorted = [...items].sort((a, b) => {
+    const catA = normalizeName(a?.category || "") || "uncategorized";
+    const catB = normalizeName(b?.category || "") || "uncategorized";
+    const catCmp = catA.localeCompare(catB);
+    if (catCmp !== 0) return catCmp;
+    return getDisplayName(a).localeCompare(getDisplayName(b));
+  });
+
+  const grouped = new Map();
+  for (const item of sorted) {
+    const category = normalizeName(item?.category || "") || "uncategorized";
+    if (!grouped.has(category)) grouped.set(category, []);
+    grouped.get(category).push(item);
+  }
+
+  const titleCase = (value) =>
+    String(value || "")
+      .split(" ")
+      .filter(Boolean)
+      .map((word) => word[0].toUpperCase() + word.slice(1))
+      .join(" ");
+
+  for (const [category, categoryItems] of grouped.entries()) {
+    const section = document.createElement("section");
+    section.className = "pantry-modal-category";
+    section.innerHTML = `
+      <h3 class="pantry-modal-category-title">
+        <span>${escapeHtml(titleCase(category))}</span>
+        <span>${categoryItems.length}</span>
+      </h3>
+    `;
+
+    for (const item of categoryItems) {
+      const card = document.createElement("article");
+      card.className = "pantry-modal-item";
+      const itemName = getDisplayName(item);
+      const unit = normalizeName(item.unit || "") || "unit";
+      const expiryLine = formatExpiryLine(item);
+      const isEditing = editingPantryItemId === item.id;
+
+      card.innerHTML = `
+        <div class="pantry-modal-item-head">
+          <div>
+            <h4>${escapeHtml(itemName)}</h4>
+            <p><strong>${Number(item.quantity || 0)}</strong> ${escapeHtml(unit)} • ${escapeHtml(expiryLine)}</p>
+          </div>
+          <div class="pantry-modal-item-actions">
+            <button type="button" class="recipe-action-btn pantry-item-edit" data-id="${item.id}">${isEditing ? "Close" : "Edit"}</button>
+            <button type="button" class="recipe-action-btn pantry-item-remove" data-id="${item.id}">Remove</button>
+          </div>
+        </div>
+      `;
+
+      if (isEditing) {
+        const form = document.createElement("form");
+        form.className = "pantry-modal-edit-form";
+        form.dataset.id = String(item.id);
+        form.innerHTML = `
+          <label>Name<input name="name" value="${escapeHtml(itemName)}" required /></label>
+          <label>Quantity<input name="quantity" type="number" step="0.01" value="${escapeHtml(String(item.quantity ?? 1))}" required /></label>
+          <label>Unit<input name="unit" value="${escapeHtml(item.unit || "")}" placeholder="unit" /></label>
+          <label>Category<input name="category" value="${escapeHtml(item.category || "")}" placeholder="uncategorized" /></label>
+          <label>Expiry<input name="expires_at" type="date" value="${escapeHtml(item.expires_at || "")}" /></label>
+          <div class="pantry-modal-edit-actions">
+            <button type="submit" class="recipe-action-btn recipe-action-btn--primary">Save</button>
+            <button type="button" class="recipe-action-btn pantry-item-cancel" data-id="${item.id}">Cancel</button>
+          </div>
+        `;
+        card.appendChild(form);
+      }
+
+      section.appendChild(card);
+    }
+
+    pantryModalList.appendChild(section);
+  }
+}
+
+function renderPantry(items) {
+  pantryList.innerHTML = "";
+
+  const makeSummaryGrid = ({ total, expiringSoon, expired, categories }) => `
     <div class="pantry-summary-grid">
-      <article class="summary-card"><h4>Total Items</h4><p>${items.length}</p></article>
-      <article class="summary-card"><h4>Expiring (7d)</h4><p>${expiringSoon}</p></article>
-      <article class="summary-card"><h4>Expired</h4><p>${expired}</p></article>
-      <article class="summary-card"><h4>Categories</h4><p>${categories.size}</p></article>
+      <button type="button" class="summary-card pantry-summary-trigger"><h4>Total Items</h4><p>${total}</p></button>
+      <button type="button" class="summary-card pantry-summary-trigger"><h4>Expiring (7d)</h4><p>${expiringSoon}</p></button>
+      <button type="button" class="summary-card pantry-summary-trigger"><h4>Expired</h4><p>${expired}</p></button>
+      <button type="button" class="summary-card pantry-summary-trigger"><h4>Categories</h4><p>${categories}</p></button>
     </div>
   `;
+
+  if (!items.length) {
+    pantryMeta.textContent = "No pantry items yet.";
+    pantryList.innerHTML = makeSummaryGrid({ total: 0, expiringSoon: 0, expired: 0, categories: 0 });
+    return;
+  }
+
+  const { expiringSoon, expired, categories } = getPantrySummary(items);
+
+  pantryMeta.textContent = `Summary view (${items.length} item${items.length === 1 ? "" : "s"})`;
+  pantryList.innerHTML = makeSummaryGrid({ total: items.length, expiringSoon, expired, categories });
 }
 
 async function refreshPantry() {
@@ -1416,6 +1521,27 @@ function closePrefsModal() {
   prefsModal.setAttribute("aria-hidden", "true");
 }
 
+async function openPantryModal() {
+  if (!authUser) {
+    addMessage("bot", "Please login first.");
+    return;
+  }
+  pantryModal?.classList.remove("hidden");
+  pantryModal?.setAttribute("aria-hidden", "false");
+  try {
+    await refreshPantry();
+    renderPantryModalList(lastPantryItems);
+  } catch (err) {
+    addMessage("bot", `Failed to load pantry details: ${err.message}`);
+  }
+}
+
+function closePantryModal() {
+  stopEditingPantryItem();
+  pantryModal?.classList.add("hidden");
+  pantryModal?.setAttribute("aria-hidden", "true");
+}
+
 async function openQueueModal() {
   if (!authUser) {
     addMessage("bot", "Please login first.");
@@ -1462,6 +1588,8 @@ registerBackdrop?.addEventListener("click", closeRegisterModal);
 prefsBtn?.addEventListener("click", openPrefsModal);
 prefsCloseBtn?.addEventListener("click", closePrefsModal);
 prefsBackdrop?.addEventListener("click", closePrefsModal);
+pantryModalCloseBtn?.addEventListener("click", closePantryModal);
+pantryModalBackdrop?.addEventListener("click", closePantryModal);
 queueBtn?.addEventListener("click", openQueueModal);
 queueCloseBtn?.addEventListener("click", closeQueueModal);
 queueBackdrop?.addEventListener("click", closeQueueModal);
@@ -1505,6 +1633,97 @@ prefsClearBtn?.addEventListener("click", async () => {
     setAuthFeedback(prefsFeedbackEl, `Clear failed: ${err.message}`, "error");
   }
 });
+
+pantryList?.addEventListener("click", async (event) => {
+  if (!event.target.closest(".pantry-summary-trigger")) return;
+  await openPantryModal();
+});
+
+pantryModalList?.addEventListener("click", async (event) => {
+  const editBtn = event.target.closest(".pantry-item-edit");
+  if (editBtn) {
+    const id = Number(editBtn.dataset.id);
+    if (Number.isNaN(id)) return;
+    editingPantryItemId = editingPantryItemId === id ? null : id;
+    renderPantryModalList(lastPantryItems);
+    return;
+  }
+
+  const cancelBtn = event.target.closest(".pantry-item-cancel");
+  if (cancelBtn) {
+    stopEditingPantryItem();
+    renderPantryModalList(lastPantryItems);
+    return;
+  }
+
+  const removeBtn = event.target.closest(".pantry-item-remove");
+  if (removeBtn) {
+    const id = Number(removeBtn.dataset.id);
+    if (Number.isNaN(id)) return;
+    try {
+      await api(`/pantry/${id}`, { method: "DELETE" });
+      stopEditingPantryItem();
+      await refreshPantry();
+      renderPantryModalList(lastPantryItems);
+      addMessage("bot", "Pantry item removed.");
+    } catch (err) {
+      addMessage("bot", `Failed to remove pantry item: ${err.message}`);
+    }
+  }
+});
+
+pantryModalList?.addEventListener("submit", async (event) => {
+  const form = event.target.closest(".pantry-modal-edit-form");
+  if (!form) return;
+  event.preventDefault();
+  const id = Number(form.dataset.id);
+  if (Number.isNaN(id)) return;
+  const name = normalizeName(String(form.elements.name?.value || ""));
+  const quantity = Number(form.elements.quantity?.value);
+  const unit = normalizeName(String(form.elements.unit?.value || "")) || "unit";
+  const category = normalizeName(String(form.elements.category?.value || "")) || "uncategorized";
+  const expiresAt = String(form.elements.expires_at?.value || "").trim();
+
+  if (!name) {
+    addMessage("bot", "Name cannot be empty.");
+    return;
+  }
+  if (Number.isNaN(quantity)) {
+    addMessage("bot", "Quantity must be a number.");
+    return;
+  }
+  if (expiresAt && !isValidDateInput(expiresAt)) {
+    addMessage("bot", "Date must be YYYY-MM-DD.");
+    return;
+  }
+
+  const buttons = Array.from(form.querySelectorAll("button"));
+  buttons.forEach((btn) => {
+    btn.disabled = true;
+  });
+  try {
+    await api(`/pantry/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        name,
+        quantity,
+        unit,
+        category,
+        expires_at: expiresAt || null,
+      }),
+    });
+    stopEditingPantryItem();
+    await refreshPantry();
+    renderPantryModalList(lastPantryItems);
+    addMessage("bot", "Pantry item updated.");
+  } catch (err) {
+    addMessage("bot", `Failed to update pantry item: ${err.message}`);
+    buttons.forEach((btn) => {
+      btn.disabled = false;
+    });
+  }
+});
+
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && !helpModal.classList.contains("hidden")) {
     closeHelpModal();
@@ -1523,6 +1742,9 @@ document.addEventListener("keydown", (event) => {
   }
   if (event.key === "Escape" && !prefsModal.classList.contains("hidden")) {
     closePrefsModal();
+  }
+  if (event.key === "Escape" && pantryModal && !pantryModal.classList.contains("hidden")) {
+    closePantryModal();
   }
   if (event.key === "Escape" && queueModal && !queueModal.classList.contains("hidden")) {
     closeQueueModal();
