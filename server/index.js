@@ -420,6 +420,17 @@ function isLikelyRecipeRequest(message) {
   return signals.some((s) => text.includes(s));
 }
 
+function isLikelyFullRecipeRequest(message) {
+  const text = String(message || "").trim().toLowerCase();
+  if (!text) return false;
+  if (/full\s+recipe/.test(text)) return true;
+  if (/step[\s-]*by[\s-]*step/.test(text)) return true;
+  if (/\binstructions?\b/.test(text)) return true;
+  if (/\bhow\s+to\s+make\b/.test(text)) return true;
+  if (/\bingredients?\b/.test(text) && /\bsteps?\b/.test(text)) return true;
+  return false;
+}
+
 function isLikelyRecipeFollowupModifier(message) {
   const text = String(message || "").trim().toLowerCase();
   if (!text) return false;
@@ -499,6 +510,10 @@ function collectRecentRecipeConstraints(history, currentMessage) {
 function resolveRecipeRouting({ message, history }) {
   const trimmed = String(message || "").trim();
   if (!trimmed) return { shouldRoute: false };
+
+  if (isLikelyFullRecipeRequest(trimmed)) {
+    return { shouldRoute: false };
+  }
 
   if (isLikelyRecipeRequest(trimmed)) {
     return {
@@ -719,6 +734,65 @@ async function requestAiRecipeSuggestions({
   });
 }
 
+async function requestAiRecipeDetail({
+  selectedModel,
+  pantrySnapshot,
+  userPreferences = "",
+  userPrompt = "",
+  recoveryHint = "",
+}) {
+  const safePreferences = sanitizeUserPreferences(userPreferences);
+  return openai.chat.completions.create({
+    model: selectedModel,
+    max_tokens: 700,
+    temperature: 0.4,
+    messages: [
+      {
+        role: "system",
+        content: [
+          "You are a pantry recipe assistant generating ONE detailed recipe.",
+          "Return exactly one recipe matching the requested dish.",
+          "Do not suggest alternatives or additional recipes.",
+          "Output format:",
+          "Name: <recipe name>",
+          "Pantry items: <comma-separated>",
+          "Missing items: <comma-separated or none>",
+          "Ingredients:",
+          "- ...",
+          "Steps:",
+          "1. ...",
+          "2. ...",
+          "If a section is unknown, still include the section with best effort.",
+        ].join("\n"),
+      },
+      {
+        role: "system",
+        content: `Current pantry snapshot JSON:\n${JSON.stringify(Array.isArray(pantrySnapshot) ? pantrySnapshot : [])}`,
+      },
+      ...(safePreferences
+        ? [
+            {
+              role: "system",
+              content: `User preferences (soft guidance):\n${safePreferences}`,
+            },
+          ]
+        : []),
+      ...(recoveryHint
+        ? [
+            {
+              role: "system",
+              content: `Previous answer was incomplete. Recovery hint: ${recoveryHint}`,
+            },
+          ]
+        : []),
+      {
+        role: "user",
+        content: String(userPrompt || "").trim(),
+      },
+    ],
+  });
+}
+
 async function requestRecipeSuggestionsWithFallback({
   message,
   count,
@@ -767,6 +841,51 @@ async function requestRecipeSuggestionsWithFallback({
   return !isLowInformationReply(raw)
     ? raw
     : "I could not generate recipe suggestions right now. Try again in a few seconds.";
+}
+
+async function requestRecipeDetailWithFallback({
+  message,
+  pantrySnapshot,
+  userPreferences,
+}) {
+  const requestWithFallback = async (recoveryHint = "") => {
+    try {
+      return await requestAiRecipeDetail({
+        selectedModel: model,
+        pantrySnapshot,
+        userPreferences,
+        userPrompt: message,
+        recoveryHint,
+      });
+    } catch (primaryErr) {
+      const isProviderUnavailable =
+        primaryErr?.status === 502 ||
+        primaryErr?.status === 503 ||
+        primaryErr?.status === 504 ||
+        /provider returned error/i.test(String(primaryErr?.message || ""));
+      const canFallback = Boolean(fallbackModel && fallbackModel !== model);
+      if (!(isProviderUnavailable && canFallback)) throw primaryErr;
+      return requestAiRecipeDetail({
+        selectedModel: fallbackModel,
+        pantrySnapshot,
+        userPreferences,
+        userPrompt: message,
+        recoveryHint,
+      });
+    }
+  };
+
+  let response = await requestWithFallback();
+  let raw = extractAssistantContent(response);
+  const missingStructure = !/\bingredients?\s*:/.test(raw.toLowerCase()) || !/\bsteps?\s*:/.test(raw.toLowerCase());
+  if (isLowInformationReply(raw) || missingStructure) {
+    const rawSnippet = String(raw || "").replace(/\s+/g, " ").trim().slice(0, 180);
+    response = await requestWithFallback(rawSnippet || "Missing ingredients/steps sections");
+    raw = extractAssistantContent(response);
+  }
+  return !isLowInformationReply(raw)
+    ? raw
+    : "I could not generate the full recipe right now. Try again in a few seconds.";
 }
 
 app.get("/health", (_req, res) => {
@@ -872,6 +991,15 @@ app.post("/api/ai/chat", requireAuth, async (req, res, next) => {
       "SELECT name, quantity, unit, category, expires_at FROM pantry_items WHERE user_id = ? ORDER BY updated_at ASC, id ASC",
       [req.user.id]
     );
+
+    if (isLikelyFullRecipeRequest(message)) {
+      const reply = await requestRecipeDetailWithFallback({
+        message,
+        pantrySnapshot,
+        userPreferences: req.user.preferences,
+      });
+      return res.json({ reply, refresh_pantry: false });
+    }
 
     const recipeRouting = resolveRecipeRouting({ message, history });
     if (recipeRouting.shouldRoute) {

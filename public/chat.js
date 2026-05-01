@@ -34,9 +34,13 @@ const queuePanel = document.getElementById("queue-panel");
 const queueModal = document.getElementById("queue-modal");
 const queueBackdrop = document.getElementById("queue-backdrop");
 const queueCloseBtn = document.getElementById("queue-close");
-const queueRefreshBtn = document.getElementById("queue-refresh");
 const queueClearBtn = document.getElementById("queue-clear");
 const queueListEl = document.getElementById("queue-list");
+const recipeModal = document.getElementById("recipe-modal");
+const recipeBackdrop = document.getElementById("recipe-backdrop");
+const recipeCloseBtn = document.getElementById("recipe-close");
+const recipeTitleEl = document.getElementById("recipe-title");
+const recipeBodyEl = document.getElementById("recipe-body");
 const authStateEl = document.getElementById("auth-state");
 const loginForm = document.getElementById("login-form");
 const registerForm = document.getElementById("register-form");
@@ -231,27 +235,52 @@ function renderBotMessageHtml(text) {
   return chunks.join("");
 }
 
+function isRecipeDetailPrefix(value) {
+  return /^(pantry items?|missing items?|ingredients?|steps?)\s*:/i.test(String(value || ""));
+}
+
+function normalizeRecipeTitleLine(line) {
+  return String(line || "")
+    .replace(/^#{1,6}\s+/, "")
+    .replace(/^\d+\.\s+/, "")
+    .replace(/^\*\*(.+?)\*\*$/, "$1")
+    .replace(/:$/, "")
+    .trim();
+}
+
+function isPossibleRecipeTitleLine(line) {
+  const value = String(line || "").trim();
+  if (!value || value.length > 120) return false;
+  if (isRecipeDetailPrefix(value)) return false;
+  if (/^[-*]\s+/.test(value)) return false;
+  if (/^\d+\.\s+/.test(value)) return true;
+  if (/^#{1,6}\s+/.test(value)) return true;
+  if (/^\*\*.+\*\*$/.test(value)) return true;
+  return /^[A-Z][\w\s'()/-]{2,}$/.test(value);
+}
+
+function extractRecipeIntroText(text) {
+  const lines = String(text || "").replace(/\r\n/g, "\n").split("\n");
+  let cutoff = lines.length;
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    const next = i + 1 < lines.length ? lines[i + 1].trim() : "";
+    if (isPossibleRecipeTitleLine(line) && (isRecipeDetailPrefix(next) || !next || /^[-*]\s+/.test(next))) {
+      cutoff = i;
+      break;
+    }
+  }
+  return lines
+    .slice(0, cutoff)
+    .join("\n")
+    .trim();
+}
+
 function extractQueuedRecipesFromText(text) {
   const lines = String(text || "").replace(/\r\n/g, "\n").split("\n");
   const recipes = [];
   let current = null;
-  const isDetailPrefix = (value) => /^(pantry items?|missing items?|ingredients?|steps?)\s*:/i.test(value);
-  const normalizeTitle = (line) =>
-    line
-      .replace(/^#{1,6}\s+/, "")
-      .replace(/^\d+\.\s+/, "")
-      .replace(/^\*\*(.+?)\*\*$/, "$1")
-      .replace(/:$/, "")
-      .trim();
-  const isPossibleTitleLine = (line) => {
-    if (!line || line.length > 120) return false;
-    if (isDetailPrefix(line)) return false;
-    if (/^[-*]\s+/.test(line)) return false;
-    if (/^\d+\.\s+/.test(line)) return true;
-    if (/^#{1,6}\s+/.test(line)) return true;
-    if (/^\*\*.+\*\*$/.test(line)) return true;
-    return /^[A-Z][\w\s'()/-]{2,}$/.test(line);
-  };
 
   const pushCurrent = () => {
     if (!current) return;
@@ -269,11 +298,11 @@ function extractQueuedRecipesFromText(text) {
       continue;
     }
 
-    const titleCandidate = normalizeTitle(line);
+    const titleCandidate = normalizeRecipeTitleLine(line);
     const next = i + 1 < lines.length ? lines[i + 1].trim().toLowerCase() : "";
     const looksLikeTitle =
-      isPossibleTitleLine(line) &&
-      (isDetailPrefix(next) || !next || /^[-*]\s+/.test(next));
+      isPossibleRecipeTitleLine(line) &&
+      (isRecipeDetailPrefix(next) || !next || /^[-*]\s+/.test(next));
 
     if (looksLikeTitle) {
       pushCurrent();
@@ -296,79 +325,261 @@ function extractQueuedRecipesFromText(text) {
   return unique.slice(0, 10);
 }
 
+function splitRecipeList(value) {
+  return String(value || "")
+    .split(/[;,]/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+function classifyRecipeLabel(label) {
+  const normalized = String(label || "").toLowerCase().trim();
+  if (!normalized) return "";
+  if (/(pantry|on hand|available|have)/.test(normalized)) return "pantry";
+  if (/(missing|need|buy|required|to get)/.test(normalized)) return "missing";
+  if (/ingredient/.test(normalized)) return "ingredients";
+  if (/step|instruction|method|direction/.test(normalized)) return "steps";
+  return "";
+}
+
+function derivePantryMissingFromIngredients(ingredients) {
+  const pantryNames = (lastPantryItems || [])
+    .map((item) => normalizeName(item?.name || item?.canonical_name || item?.display_name || ""))
+    .filter(Boolean);
+  const pantryItems = [];
+  const missingItems = [];
+  const seenPantry = new Set();
+  const seenMissing = new Set();
+
+  for (const ingredientRaw of ingredients) {
+    const ingredient = normalizeName(String(ingredientRaw || ""));
+    if (!ingredient) continue;
+    const inPantry = pantryNames.some(
+      (name) => ingredient.includes(name) || name.includes(ingredient)
+    );
+    if (inPantry) {
+      if (!seenPantry.has(ingredient)) {
+        seenPantry.add(ingredient);
+        pantryItems.push(ingredientRaw);
+      }
+    } else if (!seenMissing.has(ingredient)) {
+      seenMissing.add(ingredient);
+      missingItems.push(ingredientRaw);
+    }
+  }
+
+  return { pantryItems, missingItems };
+}
+
+function parseRecipeNotes(notes) {
+  const lines = String(notes || "").replace(/\r\n/g, "\n").split("\n");
+  const parsed = { pantryItems: [], missingItems: [], ingredients: [], steps: [], extras: [] };
+  let section = "";
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const lower = line.toLowerCase();
+    const labelMatch = line.match(/^([^:]+):\s*(.+)?$/);
+    if (labelMatch) {
+      const labelType = classifyRecipeLabel(labelMatch[1]);
+      const rest = String(labelMatch[2] || "").trim();
+      if (labelType === "pantry") {
+        const items = splitRecipeList(rest);
+        if (items.length) parsed.pantryItems.push(...items);
+        section = "pantry";
+        continue;
+      }
+      if (labelType === "missing") {
+        const items = splitRecipeList(rest);
+        if (items.length) parsed.missingItems.push(...items);
+        section = "missing";
+        continue;
+      }
+      if (labelType === "ingredients") {
+        const inline = splitRecipeList(rest);
+        if (inline.length) parsed.ingredients.push(...inline);
+        section = "ingredients";
+        continue;
+      }
+      if (labelType === "steps") {
+        if (rest) parsed.steps.push(rest);
+        section = "steps";
+        continue;
+      }
+    }
+
+    const bulletMatch = line.match(/^[-*]\s+(.+)$/);
+    const orderedMatch = line.match(/^\d+\.\s+(.+)$/);
+    const entry = bulletMatch ? bulletMatch[1].trim() : orderedMatch ? orderedMatch[1].trim() : line;
+
+    if (section === "ingredients") {
+      parsed.ingredients.push(entry);
+      continue;
+    }
+    if (section === "steps") {
+      parsed.steps.push(entry);
+      continue;
+    }
+    parsed.extras.push(line);
+  }
+
+  if ((!parsed.pantryItems.length || !parsed.missingItems.length) && parsed.ingredients.length) {
+    const derived = derivePantryMissingFromIngredients(parsed.ingredients);
+    if (!parsed.pantryItems.length && derived.pantryItems.length) {
+      parsed.pantryItems = derived.pantryItems;
+    }
+    if (!parsed.missingItems.length && derived.missingItems.length) {
+      parsed.missingItems = derived.missingItems;
+    }
+  }
+
+  return parsed;
+}
+
+function formatRecipeBody(recipe) {
+  const parsed = parseRecipeNotes(recipe.notes || "");
+  const lines = [];
+
+  if (parsed.pantryItems.length) {
+    lines.push(`Pantry Items: ${parsed.pantryItems.join(", ")}`);
+    lines.push("");
+  }
+  if (parsed.missingItems.length) {
+    lines.push(`Missing Items: ${parsed.missingItems.join(", ")}`);
+    lines.push("");
+  }
+  if (parsed.ingredients.length) {
+    lines.push("Ingredients:");
+    for (const ingredient of parsed.ingredients) lines.push(`- ${ingredient}`);
+    lines.push("");
+  }
+  if (parsed.steps.length) {
+    lines.push("Steps:");
+    parsed.steps.forEach((step, idx) => lines.push(`${idx + 1}. ${step}`));
+    lines.push("");
+  }
+  if (parsed.extras.length) {
+    lines.push(...parsed.extras);
+  }
+
+  return lines.join("\n").trim() || String(recipe.notes || "").trim() || "No recipe details available.";
+}
+
+function openRecipeModal(recipe) {
+  if (!recipeModal || !recipeTitleEl || !recipeBodyEl) return;
+  recipeTitleEl.textContent = String(recipe?.title || "Recipe");
+  recipeBodyEl.textContent = formatRecipeBody(recipe);
+  recipeModal.classList.remove("hidden");
+  recipeModal.setAttribute("aria-hidden", "false");
+}
+
+function closeRecipeModal() {
+  if (!recipeModal) return;
+  recipeModal.classList.add("hidden");
+  recipeModal.setAttribute("aria-hidden", "true");
+}
+
+async function requestFullRecipeForTitle(title, triggerButton = null) {
+  const prompt = `Give me the full recipe for "${title}" with ingredients and step-by-step instructions for exactly this dish only. Do not suggest alternatives.`;
+  try {
+    if (triggerButton) triggerButton.disabled = true;
+    await handleChat(prompt);
+  } catch (err) {
+    addMessage("bot", `Error: ${err.message}`);
+  } finally {
+    if (triggerButton) triggerButton.disabled = false;
+  }
+}
+
+function createRecipeQueueButton(recipe) {
+  const queueButton = document.createElement("button");
+  queueButton.type = "button";
+  queueButton.className = "recipe-action-btn recipe-action-btn--primary";
+  queueButton.textContent = "+ Queue";
+  queueButton.title = `Add "${recipe.title}" to queue`;
+  queueButton.addEventListener("click", async () => {
+    try {
+      ensureSignedIn();
+      queueButton.disabled = true;
+      await api("/recipe-queue/bulk", {
+        method: "POST",
+        body: JSON.stringify({ recipes: [recipe] }),
+      });
+      await refreshQueueList().catch(() => {});
+      addMessage("bot", `Queued: ${recipe.title}`);
+    } catch (err) {
+      addMessage("bot", `Failed to queue recipe: ${err.message}`);
+    } finally {
+      queueButton.disabled = false;
+    }
+  });
+  return queueButton;
+}
+
+function createRecipePromptButton(recipe) {
+  const recipeButton = document.createElement("button");
+  recipeButton.type = "button";
+  recipeButton.className = "recipe-action-btn";
+  recipeButton.textContent = "Recipe";
+  recipeButton.addEventListener("click", async () => {
+    await requestFullRecipeForTitle(recipe.title, recipeButton);
+  });
+  return recipeButton;
+}
+
+function renderRecipeCards(recipes) {
+  const cards = document.createElement("div");
+  cards.className = "recipe-cards";
+
+  for (const recipe of recipes) {
+    const parsed = parseRecipeNotes(recipe.notes || "");
+    const pantryText = parsed.pantryItems.length ? parsed.pantryItems.join(", ") : "None listed";
+    const missingText = parsed.missingItems.length ? parsed.missingItems.join(", ") : "None";
+    const card = document.createElement("article");
+    card.className = "recipe-card";
+    card.innerHTML = `
+      <div class="recipe-card-head">
+        <h4 class="recipe-card-title">${escapeHtml(recipe.title)}</h4>
+        <div class="recipe-card-actions"></div>
+      </div>
+      <div class="recipe-card-lines">
+        <p class="recipe-card-line"><strong>Pantry items:</strong> ${escapeHtml(pantryText)}</p>
+        <p class="recipe-card-line"><strong>Missing items:</strong> ${escapeHtml(missingText)}</p>
+      </div>
+    `;
+    const actions = card.querySelector(".recipe-card-actions");
+    actions?.appendChild(createRecipePromptButton(recipe));
+    actions?.appendChild(createRecipeQueueButton(recipe));
+    cards.appendChild(card);
+  }
+
+  return cards;
+}
+
+function isLikelyFullRecipeResponse(text) {
+  const value = String(text || "").toLowerCase();
+  if (!value) return false;
+  const hasIngredients = /\bingredients?\s*:/.test(value);
+  const hasSteps = /\bsteps?\s*:/.test(value) || /\binstructions?\s*:/.test(value);
+  return hasIngredients && hasSteps;
+}
+
 function addMessage(role, text) {
   const el = document.createElement("div");
   el.className = `msg ${role}`;
   if (role === "bot") {
-    el.innerHTML = renderBotMessageHtml(text);
     const recipeCandidates = extractQueuedRecipesFromText(text);
-    if (recipeCandidates.length) {
-      const buildQueueButton = (recipe) => {
-        const queueButton = document.createElement("button");
-        queueButton.type = "button";
-        queueButton.className = "ghost recipe-inline-queue-btn";
-        queueButton.textContent = "Add to queue";
-        queueButton.title = `Add "${recipe.title}" to queue`;
-        queueButton.addEventListener("click", async () => {
-          try {
-            ensureSignedIn();
-            queueButton.disabled = true;
-            await api("/recipe-queue/bulk", {
-              method: "POST",
-              body: JSON.stringify({ recipes: [recipe] }),
-            });
-            await refreshQueueList().catch(() => {});
-            addMessage("bot", `Queued: ${recipe.title}`);
-          } catch (err) {
-            addMessage("bot", `Failed to queue recipe: ${err.message}`);
-          } finally {
-            queueButton.disabled = false;
-          }
-        });
-        return queueButton;
-      };
-
-      const titleEls = Array.from(el.querySelectorAll(".recipe-title"));
-      const inlineCount = Math.min(titleEls.length, recipeCandidates.length);
-      for (let i = 0; i < inlineCount; i += 1) {
-        const row = document.createElement("div");
-        row.className = "recipe-title-row";
-        const titleEl = titleEls[i];
-        titleEl.parentNode.insertBefore(row, titleEl);
-        row.appendChild(titleEl);
-        row.appendChild(buildQueueButton(recipeCandidates[i]));
+    if (recipeCandidates.length && !isLikelyFullRecipeResponse(text)) {
+      const introText = extractRecipeIntroText(text);
+      if (introText) {
+        el.innerHTML = renderBotMessageHtml(introText);
+      } else {
+        el.innerHTML = "<p>Recommended recipes:</p>";
       }
-
-      const actions = document.createElement("div");
-      actions.className = "msg-actions";
-      for (let i = inlineCount; i < recipeCandidates.length; i += 1) {
-        actions.appendChild(buildQueueButton(recipeCandidates[i]));
-      }
-
-      if (recipeCandidates.length > 1) {
-        const queueAllBtn = document.createElement("button");
-        queueAllBtn.type = "button";
-        queueAllBtn.className = "ghost";
-        queueAllBtn.textContent = "Add all to queue";
-        queueAllBtn.addEventListener("click", async () => {
-          try {
-            ensureSignedIn();
-            queueAllBtn.disabled = true;
-            const result = await api("/recipe-queue/bulk", {
-              method: "POST",
-              body: JSON.stringify({ recipes: recipeCandidates }),
-            });
-            await refreshQueueList().catch(() => {});
-            addMessage("bot", `Queued ${Number(result?.added || recipeCandidates.length)} recipe(s).`);
-          } catch (err) {
-            addMessage("bot", `Failed to queue recipes: ${err.message}`);
-          } finally {
-            queueAllBtn.disabled = false;
-          }
-        });
-        actions.appendChild(queueAllBtn);
-      }
-      if (actions.childElementCount) el.appendChild(actions);
+      el.appendChild(renderRecipeCards(recipeCandidates));
+    } else {
+      el.innerHTML = renderBotMessageHtml(text);
     }
   } else {
     el.textContent = text;
@@ -392,11 +603,15 @@ async function refreshQueueList() {
     item.className = "queue-item";
     item.innerHTML = `
       <h4>${escapeHtml(row.title)}</h4>
-      <p>${escapeHtml(row.notes || "")}</p>
-      <div class="prefs-actions">
-        <button type="button" class="ghost queue-remove" data-id="${row.id}">Remove</button>
+      <div class="prefs-actions queue-item-actions">
+        <button type="button" class="recipe-action-btn queue-recipe">Recipe</button>
+        <button type="button" class="recipe-action-btn queue-remove" data-id="${row.id}">Remove</button>
       </div>
     `;
+    item.querySelector(".queue-recipe")?.addEventListener("click", async (event) => {
+      const btn = event.currentTarget;
+      await requestFullRecipeForTitle(row.title, btn);
+    });
     item.querySelector(".queue-remove")?.addEventListener("click", async () => {
       try {
         await api(`/recipe-queue/${row.id}`, { method: "DELETE" });
@@ -560,185 +775,38 @@ function renderPantry(items) {
 
   if (!items.length) {
     pantryMeta.textContent = "No pantry items yet.";
-    const empty = document.createElement("div");
-    empty.className = "pantry-item";
-    empty.innerHTML = "<h3>Empty pantry</h3><p>Try: <strong>add green beans,corn</strong></p>";
-    pantryList.appendChild(empty);
+    pantryList.innerHTML = `
+      <div class="pantry-summary-grid">
+        <article class="summary-card"><h4>Total Items</h4><p>0</p></article>
+        <article class="summary-card"><h4>Expiring (7d)</h4><p>0</p></article>
+        <article class="summary-card"><h4>Expired</h4><p>0</p></article>
+        <article class="summary-card"><h4>Categories</h4><p>0</p></article>
+      </div>
+    `;
     return;
   }
 
-  pantryMeta.textContent = `${items.length} item${items.length === 1 ? "" : "s"} in pantry`;
+  const expiringSoon = items.filter((item) => {
+    const days = daysUntil(item.expires_at);
+    return days !== null && days >= 0 && days <= 7;
+  }).length;
+  const expired = items.filter((item) => {
+    const days = daysUntil(item.expires_at);
+    return days !== null && days < 0;
+  }).length;
+  const categories = new Set(
+    items.map((item) => normalizeName(item?.category || "") || "uncategorized")
+  );
 
-  const displayName = (item) => item?.name || item?.canonical_name || item?.display_name || "unnamed item";
-  const normalizeCategory = (item) => normalizeName(item?.category || "") || "uncategorized";
-  const titleCase = (value) =>
-    String(value || "")
-      .split(" ")
-      .filter(Boolean)
-      .map((word) => word[0].toUpperCase() + word.slice(1))
-      .join(" ");
-
-  const sorted = [...items].sort((a, b) => {
-    const catCompare = normalizeCategory(a).localeCompare(normalizeCategory(b));
-    if (catCompare !== 0) return catCompare;
-    return displayName(a).localeCompare(displayName(b));
-  });
-
-  const grouped = new Map();
-  for (const item of sorted) {
-    const category = normalizeCategory(item);
-    if (!grouped.has(category)) grouped.set(category, []);
-    grouped.get(category).push(item);
-  }
-
-  const categoryOrder = Array.from(grouped.keys()).sort((a, b) => {
-    if (a === "uncategorized") return 1;
-    if (b === "uncategorized") return -1;
-    return a.localeCompare(b);
-  });
-
-  for (const category of categoryOrder) {
-    const section = document.createElement("section");
-    section.className = "pantry-group";
-    const groupItems = grouped.get(category) || [];
-    section.innerHTML = `
-      <h3 class="pantry-group-title">
-        <span>${titleCase(category)}</span>
-        <span class="pantry-group-count">${groupItems.length}</span>
-      </h3>
-    `;
-
-    for (const item of groupItems) {
-      const card = document.createElement("div");
-      card.className = "pantry-item";
-      const isEditing = editingPantryItemId === item.id;
-
-      const days = daysUntil(item.expires_at);
-      const expiryLine = !item.expires_at
-        ? "No expiry"
-        : days < 0
-          ? `<span class=\"warn\">Expired ${Math.abs(days)}d ago</span>`
-          : days <= 7
-            ? `<span class=\"warn\">Expires in ${days}d</span>`
-            : `Expires in ${days}d`;
-
-      card.innerHTML = `
-        <div class="pantry-item-row">
-          <div class="pantry-item-main">
-            <h4 class="pantry-item-name">${escapeHtml(displayName(item))}</h4>
-            <p><strong>${item.quantity}</strong> ${item.unit || "unit"} • ${expiryLine}</p>
-          </div>
-        </div>
-      `;
-
-      const actions = document.createElement("div");
-      actions.className = "pantry-actions";
-      const editBtn = document.createElement("button");
-      editBtn.type = "button";
-      editBtn.className = "ghost pantry-edit-btn";
-      editBtn.textContent = isEditing ? "Close" : "Edit";
-      editBtn.addEventListener("click", () => {
-        if (isEditing) {
-          stopEditingPantryItem();
-          return;
-        }
-        startEditingPantryItem(item.id);
-      });
-      actions.appendChild(editBtn);
-      card.querySelector(".pantry-item-row")?.appendChild(actions);
-
-      if (isEditing) {
-        const nameEl = card.querySelector(".pantry-item-name");
-        if (nameEl) {
-          nameEl.setAttribute("contenteditable", "true");
-          nameEl.setAttribute("spellcheck", "false");
-          nameEl.setAttribute("tabindex", "0");
-          nameEl.classList.add("pantry-item-name--editable");
-          nameEl.setAttribute("title", "Click to rename");
-          nameEl.addEventListener("keydown", (event) => {
-            if (event.key === "Enter") {
-              event.preventDefault();
-              nameEl.blur();
-            }
-          });
-        }
-
-        const form = document.createElement("form");
-        form.className = "pantry-edit-form";
-        form.innerHTML = `
-        <label>
-          Category
-          <input name="category" value="${escapeHtml(item.category || "")}" placeholder="uncategorized" />
-        </label>
-        <label>
-          Unit
-          <input name="unit" value="${escapeHtml(item.unit || "")}" placeholder="unit" />
-        </label>
-        <label>
-          Expiry
-          <input name="expires_at" type="date" value="${escapeHtml(item.expires_at || "")}" />
-        </label>
-        <div class="pantry-edit-actions">
-          <button type="submit">Save</button>
-          <button type="button" class="ghost pantry-cancel-btn">Cancel</button>
-        </div>
-      `;
-
-        form.addEventListener("submit", async (event) => {
-          event.preventDefault();
-          const updatedName = normalizeName(String(nameEl?.textContent || ""));
-          const categoryInput = String(form.elements.category?.value || "");
-          const unitInput = String(form.elements.unit?.value || "");
-          const expiryInput = String(form.elements.expires_at?.value || "").trim();
-          const category = normalizeName(categoryInput) || "uncategorized";
-          const unit = normalizeName(unitInput) || "unit";
-          if (!updatedName) {
-            addMessage("bot", "Name cannot be empty.");
-            return;
-          }
-          if (expiryInput && !isValidDateInput(expiryInput)) {
-            addMessage("bot", "Date must be YYYY-MM-DD.");
-            return;
-          }
-
-          const buttons = Array.from(form.querySelectorAll("button"));
-          buttons.forEach((btn) => {
-            btn.disabled = true;
-          });
-          try {
-            await api(`/pantry/${item.id}`, {
-              method: "PATCH",
-              body: JSON.stringify({
-                name: updatedName,
-                category,
-                unit,
-                expires_at: expiryInput || null,
-              }),
-            });
-            editingPantryItemId = null;
-            await refreshPantry();
-            addMessage(
-              "bot",
-              `Updated ${displayName(item)}${updatedName !== normalizeName(displayName(item)) ? ` -> ${updatedName}` : ""}: category=${category}, unit=${unit}, expiry=${expiryInput || "none"}.`
-            );
-          } catch (err) {
-            addMessage("bot", `Failed to update ${displayName(item)}: ${err.message}`);
-            buttons.forEach((btn) => {
-              btn.disabled = false;
-            });
-          }
-        });
-
-        form.querySelector(".pantry-cancel-btn")?.addEventListener("click", () => {
-          stopEditingPantryItem();
-        });
-        card.appendChild(form);
-      }
-
-      section.appendChild(card);
-    }
-    pantryList.appendChild(section);
-  }
+  pantryMeta.textContent = `Summary view (${items.length} item${items.length === 1 ? "" : "s"})`;
+  pantryList.innerHTML = `
+    <div class="pantry-summary-grid">
+      <article class="summary-card"><h4>Total Items</h4><p>${items.length}</p></article>
+      <article class="summary-card"><h4>Expiring (7d)</h4><p>${expiringSoon}</p></article>
+      <article class="summary-card"><h4>Expired</h4><p>${expired}</p></article>
+      <article class="summary-card"><h4>Categories</h4><p>${categories.size}</p></article>
+    </div>
+  `;
 }
 
 async function refreshPantry() {
@@ -1226,14 +1294,6 @@ document.getElementById("clear-context")?.addEventListener("click", () => {
   clearConversationContext();
 });
 
-document.getElementById("refresh-pantry").addEventListener("click", async () => {
-  try {
-    await refreshPantry();
-    addMessage("bot", "Pantry refreshed.");
-  } catch (err) {
-    addMessage("bot", `Refresh failed: ${err.message}`);
-  }
-});
 
 loginForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -1385,6 +1445,8 @@ helpBackdrop.addEventListener("click", closeHelpModal);
 aboutBtn.addEventListener("click", openAboutModal);
 aboutCloseBtn.addEventListener("click", closeAboutModal);
 aboutBackdrop.addEventListener("click", closeAboutModal);
+recipeCloseBtn?.addEventListener("click", closeRecipeModal);
+recipeBackdrop?.addEventListener("click", closeRecipeModal);
 loginBtn?.addEventListener("click", openLoginModal);
 loginCloseBtn?.addEventListener("click", closeLoginModal);
 loginBackdrop?.addEventListener("click", closeLoginModal);
@@ -1397,13 +1459,6 @@ prefsBackdrop?.addEventListener("click", closePrefsModal);
 queueBtn?.addEventListener("click", openQueueModal);
 queueCloseBtn?.addEventListener("click", closeQueueModal);
 queueBackdrop?.addEventListener("click", closeQueueModal);
-queueRefreshBtn?.addEventListener("click", async () => {
-  try {
-    await refreshQueueList();
-  } catch (err) {
-    addMessage("bot", `Failed to refresh queued recipes: ${err.message}`);
-  }
-});
 queueClearBtn?.addEventListener("click", async () => {
   try {
     ensureSignedIn();
@@ -1450,6 +1505,9 @@ document.addEventListener("keydown", (event) => {
   }
   if (event.key === "Escape" && !aboutModal.classList.contains("hidden")) {
     closeAboutModal();
+  }
+  if (event.key === "Escape" && recipeModal && !recipeModal.classList.contains("hidden")) {
+    closeRecipeModal();
   }
   if (event.key === "Escape" && !loginModal.classList.contains("hidden")) {
     closeLoginModal();

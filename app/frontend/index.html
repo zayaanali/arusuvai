@@ -71,7 +71,6 @@
         <section class="panel pantry-panel">
           <div class="panel-head">
             <h2>Pantry</h2>
-            <button id="refresh-pantry" class="ghost">Refresh</button>
           </div>
 
           <div class="meta" id="pantry-meta">Loading pantry...</div>
@@ -82,7 +81,6 @@
           <div class="panel-head">
             <h2>Queued Recipes</h2>
             <div class="prefs-actions">
-              <button id="queue-refresh" type="button">Refresh</button>
               <button id="queue-clear" type="button" class="ghost">Clear All</button>
             </div>
           </div>
@@ -212,6 +210,19 @@
             <strong>Arusuvai (அறுசுவை)</strong> means “six tastes” in Tamil — the idea that a complete, satisfying meal
             balances sweet, sour, salty, spicy, bitter, and astringent flavors into one harmonious whole.
           </p>
+        </div>
+      </section>
+    </div>
+
+    <div id="recipe-modal" class="modal hidden" aria-hidden="true" role="dialog" aria-labelledby="recipe-title">
+      <div id="recipe-backdrop" class="modal-backdrop"></div>
+      <section class="modal-card">
+        <div class="modal-head">
+          <h2 id="recipe-title">Recipe</h2>
+          <button id="recipe-close" type="button" class="ghost">Close</button>
+        </div>
+        <div class="modal-body">
+          <pre id="recipe-body" class="recipe-modal-body"></pre>
         </div>
       </section>
     </div>
