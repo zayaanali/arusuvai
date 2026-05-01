@@ -796,6 +796,31 @@ function formatExpiryLine(item) {
   return `Expires in ${days}d`;
 }
 
+function parseDateOnly(value) {
+  const text = String(value || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return null;
+  const parsed = new Date(`${text}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed;
+}
+
+function toDateOnlyString(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function getExtendedExpiryDate(existingExpiry, bumpDays) {
+  const today = new Date();
+  const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const current = parseDateOnly(existingExpiry);
+  const base = current && current.getTime() > todayStart.getTime() ? current : todayStart;
+  const next = new Date(base);
+  next.setDate(next.getDate() + bumpDays);
+  return toDateOnlyString(next);
+}
+
 function stopEditingPantryItem() {
   editingPantryItemId = null;
 }
@@ -878,7 +903,14 @@ function renderPantryModalList(items) {
           <label>Quantity<input name="quantity" type="number" step="0.01" value="${escapeHtml(String(item.quantity ?? 1))}" required /></label>
           <label>Unit<input name="unit" value="${escapeHtml(item.unit || "")}" placeholder="unit" /></label>
           <label>Category<input name="category" value="${escapeHtml(item.category || "")}" placeholder="uncategorized" /></label>
-          <label>Expiry<input name="expires_at" type="date" value="${escapeHtml(item.expires_at || "")}" /></label>
+          <div class="pantry-modal-expiry-quick">
+            <span>Extend expiry</span>
+            <div class="pantry-expiry-bumps">
+              <button type="button" class="recipe-action-btn pantry-expiry-bump" data-id="${item.id}" data-days="1">+1d</button>
+              <button type="button" class="recipe-action-btn pantry-expiry-bump" data-id="${item.id}" data-days="3">+3d</button>
+              <button type="button" class="recipe-action-btn pantry-expiry-bump" data-id="${item.id}" data-days="7">+7d</button>
+            </div>
+          </div>
           <div class="pantry-modal-edit-actions">
             <button type="submit" class="recipe-action-btn recipe-action-btn--primary">Save</button>
             <button type="button" class="recipe-action-btn pantry-item-cancel" data-id="${item.id}">Cancel</button>
@@ -1640,6 +1672,29 @@ pantryList?.addEventListener("click", async (event) => {
 });
 
 pantryModalList?.addEventListener("click", async (event) => {
+  const bumpBtn = event.target.closest(".pantry-expiry-bump");
+  if (bumpBtn) {
+    const id = Number(bumpBtn.dataset.id);
+    const bumpDays = Number(bumpBtn.dataset.days);
+    if (Number.isNaN(id) || Number.isNaN(bumpDays) || bumpDays <= 0) return;
+    const targetItem = lastPantryItems.find((item) => item.id === id);
+    if (!targetItem) return;
+    const nextExpiry = getExtendedExpiryDate(targetItem.expires_at, bumpDays);
+    try {
+      bumpBtn.disabled = true;
+      await api(`/pantry/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ expires_at: nextExpiry }),
+      });
+      await refreshPantry();
+      renderPantryModalList(lastPantryItems);
+    } catch (err) {
+      addMessage("bot", `Failed to update expiry: ${err.message}`);
+      bumpBtn.disabled = false;
+    }
+    return;
+  }
+
   const editBtn = event.target.closest(".pantry-item-edit");
   if (editBtn) {
     const id = Number(editBtn.dataset.id);
@@ -1682,7 +1737,6 @@ pantryModalList?.addEventListener("submit", async (event) => {
   const quantity = Number(form.elements.quantity?.value);
   const unit = normalizeName(String(form.elements.unit?.value || "")) || "unit";
   const category = normalizeName(String(form.elements.category?.value || "")) || "uncategorized";
-  const expiresAt = String(form.elements.expires_at?.value || "").trim();
 
   if (!name) {
     addMessage("bot", "Name cannot be empty.");
@@ -1690,10 +1744,6 @@ pantryModalList?.addEventListener("submit", async (event) => {
   }
   if (Number.isNaN(quantity)) {
     addMessage("bot", "Quantity must be a number.");
-    return;
-  }
-  if (expiresAt && !isValidDateInput(expiresAt)) {
-    addMessage("bot", "Date must be YYYY-MM-DD.");
     return;
   }
 
@@ -1709,7 +1759,6 @@ pantryModalList?.addEventListener("submit", async (event) => {
         quantity,
         unit,
         category,
-        expires_at: expiresAt || null,
       }),
     });
     stopEditingPantryItem();

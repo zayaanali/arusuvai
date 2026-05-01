@@ -725,7 +725,7 @@ button {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 6px;
-  align-items: start;
+  align-items: stretch;
 }
 
 .pantry-modal-category-title {
@@ -748,6 +748,9 @@ button {
   background: #f5fbf7;
   border-radius: 10px;
   padding: 7px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
 }
 
 .pantry-modal-category .pantry-modal-item + .pantry-modal-item {
@@ -772,6 +775,20 @@ button {
   color: var(--muted);
 }
 
+.pantry-expiry-bumps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(72px, 1fr));
+  gap: 5px;
+}
+
+.pantry-expiry-bumps .recipe-action-btn {
+  width: 100%;
+  padding: 7px 10px;
+  font-size: 0.82rem;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
 .pantry-modal-item-actions {
   display: flex;
   gap: 6px;
@@ -792,6 +809,14 @@ button {
   color: var(--muted);
 }
 
+.pantry-modal-expiry-quick {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 4px;
+  font-size: 0.74rem;
+  color: var(--muted);
+}
+
 .pantry-modal-edit-form input {
   width: 100%;
   box-sizing: border-box;
@@ -801,9 +826,17 @@ button {
 
 .pantry-modal-edit-actions {
   grid-column: 1 / -1;
-  display: flex;
-  justify-content: flex-end;
-  gap: 6px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.pantry-modal-edit-actions .recipe-action-btn {
+  width: 100%;
+  min-width: 0;
+  padding: 6px 10px;
+  font-size: 0.78rem;
+  white-space: nowrap;
 }
 
 .recipe-modal-body {
