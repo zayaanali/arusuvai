@@ -1191,8 +1191,15 @@ app.post("/api/ai/recipes", requireAuth, async (req, res, next) => {
 
 app.get("/api/recipe-queue", requireAuth, async (req, res, next) => {
   try {
+    await run(
+      `UPDATE queued_recipes
+       SET sort_order = id
+       WHERE user_id = ?
+         AND (sort_order IS NULL OR sort_order <= 0)`,
+      [req.user.id]
+    );
     const rows = await all(
-      "SELECT id, title, notes, created_at FROM queued_recipes WHERE user_id = ? ORDER BY id DESC",
+      "SELECT id, title, notes, created_at, sort_order FROM queued_recipes WHERE user_id = ? ORDER BY sort_order ASC, id ASC",
       [req.user.id]
     );
     res.json(rows);
@@ -1206,24 +1213,131 @@ app.post("/api/recipe-queue/bulk", requireAuth, async (req, res, next) => {
     const recipes = Array.isArray(req.body?.recipes) ? req.body.recipes : [];
     if (!recipes.length) return badRequest(res, "recipes is required");
     const now = new Date().toISOString();
+    const currentMaxOrderRow = await get(
+      "SELECT COALESCE(MAX(sort_order), 0) AS max_order FROM queued_recipes WHERE user_id = ?",
+      [req.user.id]
+    );
+    let nextSortOrder = Number(currentMaxOrderRow?.max_order || 0);
     const added = [];
     for (const item of recipes.slice(0, 20)) {
       const title = String(item?.title || "").trim();
       const notes = String(item?.notes || "").trim();
       if (!title) continue;
+      nextSortOrder += 1;
       const result = await run(
-        "INSERT INTO queued_recipes (user_id, title, notes, created_at) VALUES (?, ?, ?, ?)",
-        [req.user.id, title.slice(0, 200), notes.slice(0, 4000), now]
+        "INSERT INTO queued_recipes (user_id, title, notes, sort_order, created_at) VALUES (?, ?, ?, ?, ?)",
+        [req.user.id, title.slice(0, 200), notes.slice(0, 4000), nextSortOrder, now]
       );
       added.push(result.id);
     }
     if (!added.length) return badRequest(res, "No valid recipes to queue");
     const placeholders = added.map(() => "?").join(", ");
     const rows = await all(
-      `SELECT id, title, notes, created_at FROM queued_recipes WHERE id IN (${placeholders}) ORDER BY id DESC`,
+      `SELECT id, title, notes, created_at, sort_order FROM queued_recipes WHERE id IN (${placeholders}) ORDER BY sort_order ASC, id ASC`,
       added
     );
     res.status(201).json({ added: rows.length, recipes: rows });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.patch("/api/recipe-queue/:id", requireAuth, async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (Number.isNaN(id)) return badRequest(res, "invalid id");
+    const title = String(req.body?.title || "").trim();
+    if (!title) return badRequest(res, "title is required");
+    const normalizedTitle = title.slice(0, 200);
+    const result = await run("UPDATE queued_recipes SET title = ? WHERE id = ? AND user_id = ?", [
+      normalizedTitle,
+      id,
+      req.user.id,
+    ]);
+    if (!result.changes) return res.status(404).json({ error: "Queued recipe not found" });
+    const row = await get(
+      "SELECT id, title, notes, created_at, sort_order FROM queued_recipes WHERE id = ? AND user_id = ?",
+      [id, req.user.id]
+    );
+    res.json(row);
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post("/api/recipe-queue/:id/move", requireAuth, async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (Number.isNaN(id)) return badRequest(res, "invalid id");
+    const direction = String(req.body?.direction || "").trim().toLowerCase();
+    if (!["up", "down"].includes(direction)) return badRequest(res, "direction must be up or down");
+
+    await run(
+      `UPDATE queued_recipes
+       SET sort_order = id
+       WHERE user_id = ?
+         AND (sort_order IS NULL OR sort_order <= 0)`,
+      [req.user.id]
+    );
+
+    const current = await get(
+      "SELECT id, sort_order FROM queued_recipes WHERE id = ? AND user_id = ?",
+      [id, req.user.id]
+    );
+    if (!current) return res.status(404).json({ error: "Queued recipe not found" });
+
+    const comparator = direction === "up" ? "<" : ">";
+    const sortDirection = direction === "up" ? "DESC" : "ASC";
+    const neighbor = await get(
+      `SELECT id, sort_order
+       FROM queued_recipes
+       WHERE user_id = ?
+         AND sort_order ${comparator} ?
+       ORDER BY sort_order ${sortDirection}, id ${sortDirection}
+       LIMIT 1`,
+      [req.user.id, current.sort_order]
+    );
+    if (!neighbor) return res.json({ moved: false });
+
+    await run("UPDATE queued_recipes SET sort_order = ? WHERE id = ? AND user_id = ?", [
+      neighbor.sort_order,
+      current.id,
+      req.user.id,
+    ]);
+    await run("UPDATE queued_recipes SET sort_order = ? WHERE id = ? AND user_id = ?", [
+      current.sort_order,
+      neighbor.id,
+      req.user.id,
+    ]);
+
+    res.json({ moved: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post("/api/recipe-queue/reorder", requireAuth, async (req, res, next) => {
+  try {
+    const orderedIds = Array.isArray(req.body?.orderedIds) ? req.body.orderedIds : [];
+    if (!orderedIds.length) return badRequest(res, "orderedIds is required");
+    const ids = orderedIds.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0);
+    if (ids.length !== orderedIds.length) return badRequest(res, "orderedIds must be integer ids");
+
+    const rows = await all("SELECT id FROM queued_recipes WHERE user_id = ?", [req.user.id]);
+    const existingIds = new Set(rows.map((row) => Number(row.id)));
+    if (ids.length !== existingIds.size) return badRequest(res, "orderedIds must include all queued recipes");
+    for (const id of ids) {
+      if (!existingIds.has(id)) return badRequest(res, "orderedIds includes unknown recipe id");
+    }
+
+    for (let index = 0; index < ids.length; index += 1) {
+      await run("UPDATE queued_recipes SET sort_order = ? WHERE id = ? AND user_id = ?", [
+        index + 1,
+        ids[index],
+        req.user.id,
+      ]);
+    }
+    res.json({ updated: ids.length });
   } catch (err) {
     next(err);
   }

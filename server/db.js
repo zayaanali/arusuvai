@@ -167,10 +167,17 @@ async function initDb() {
       user_id INTEGER NOT NULL,
       title TEXT NOT NULL,
       notes TEXT,
+      sort_order INTEGER,
       created_at TEXT NOT NULL,
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     )
   `);
+
+  const queueColumns = await all("PRAGMA table_info(queued_recipes)");
+  const hasSortOrder = queueColumns.some((column) => column && column.name === "sort_order");
+  if (!hasSortOrder) {
+    await run("ALTER TABLE queued_recipes ADD COLUMN sort_order INTEGER");
+  }
 }
 
 module.exports = {

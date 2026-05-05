@@ -603,16 +603,92 @@ async function refreshQueueList() {
     queueListEl.appendChild(empty);
     return;
   }
+  let draggingId = null;
+  const persistQueueOrder = async () => {
+    const orderedIds = Array.from(queueListEl.querySelectorAll(".queue-item")).map((el) =>
+      Number(el.getAttribute("data-id"))
+    );
+    try {
+      await api("/recipe-queue/reorder", {
+        method: "POST",
+        body: JSON.stringify({ orderedIds }),
+      });
+    } catch (err) {
+      addMessage("bot", `Failed to reorder queue: ${err.message}`);
+      await refreshQueueList();
+    }
+  };
   for (const row of rows) {
     const item = document.createElement("div");
     item.className = "queue-item";
+    item.setAttribute("data-id", String(row.id));
+    item.setAttribute("draggable", "true");
     item.innerHTML = `
-      <h4>${escapeHtml(row.title)}</h4>
+      <h4 class="queue-title" role="button" tabindex="0" title="Click to rename">${escapeHtml(row.title)}</h4>
       <div class="prefs-actions queue-item-actions">
         <button type="button" class="recipe-action-btn queue-recipe">Recipe</button>
         <button type="button" class="recipe-action-btn queue-remove" data-id="${row.id}">Remove</button>
       </div>
     `;
+    const titleEl = item.querySelector(".queue-title");
+    const renameRecipe = async () => {
+      const nextTitle = window.prompt("Edit queued recipe name:", row.title);
+      if (nextTitle === null) return;
+      const trimmed = String(nextTitle || "").trim();
+      if (!trimmed) return;
+      try {
+        await api(`/recipe-queue/${row.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ title: trimmed }),
+        });
+        await refreshQueueList();
+      } catch (err) {
+        addMessage("bot", `Failed to rename queued recipe: ${err.message}`);
+      }
+    };
+    titleEl?.addEventListener("click", renameRecipe);
+    titleEl?.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        renameRecipe();
+      }
+    });
+    item.addEventListener("dragstart", (event) => {
+      const target = event.target;
+      if (target instanceof HTMLElement && target.closest("button")) {
+        event.preventDefault();
+        return;
+      }
+      draggingId = row.id;
+      item.classList.add("is-dragging");
+      event.dataTransfer?.setData("text/plain", String(row.id));
+      if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
+    });
+    item.addEventListener("dragend", async () => {
+      item.classList.remove("is-dragging");
+      draggingId = null;
+      queueListEl.querySelectorAll(".queue-item").forEach((el) => el.classList.remove("drag-over"));
+      await persistQueueOrder();
+    });
+    item.addEventListener("dragover", (event) => {
+      if (!draggingId || draggingId === row.id) return;
+      event.preventDefault();
+      const rect = item.getBoundingClientRect();
+      const before = event.clientY < rect.top + rect.height / 2;
+      if (before) {
+        queueListEl.insertBefore(queueListEl.querySelector('.queue-item.is-dragging'), item);
+      } else {
+        queueListEl.insertBefore(queueListEl.querySelector('.queue-item.is-dragging'), item.nextSibling);
+      }
+      item.classList.add("drag-over");
+    });
+    item.addEventListener("dragleave", () => {
+      item.classList.remove("drag-over");
+    });
+    item.addEventListener("drop", (event) => {
+      event.preventDefault();
+      item.classList.remove("drag-over");
+    });
     item.querySelector(".queue-recipe")?.addEventListener("click", async (event) => {
       const btn = event.currentTarget;
       await requestFullRecipeForTitle(row.title, btn);
